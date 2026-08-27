@@ -1,1376 +1,1297 @@
 <!DOCTYPE html>
-<html lang="th" class="dark h-full">
+<html lang="th" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AR Knot Trainer - ระบบ AR ฝึกจำและจำลองการผูกเชือก</title>
+    <title>AR RopePath Studio</title>
     
-    <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#07111F">
+    <!-- PWA Setup -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="description" content="ฝึกจำและจำลองขั้นตอนการผูกเชือกในรูปแบบ Interactive AR">
-
-    <!-- Fonts & Styling -->
+    <link rel="apple-touch-icon" href="https://placehold.co/192x192/4f46e5/ffffff?text=AR">
+    
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
     <script>
         tailwind.config = {
             darkMode: 'class',
             theme: {
                 extend: {
                     colors: {
-                        arBg: '#07111F',
-                        arPrimary: '#00D1FF',
-                        arSuccess: '#26D07C',
-                        arWarning: '#FFB020',
-                        arError: '#FF4D5E',
-                        arCard: 'rgba(15, 28, 48, 0.75)',
+                        primary: '#4f46e5',
+                        secondary: '#10b981',
+                        darkBg: '#0f172a',
+                        darkCard: '#1e293b'
                     },
                     fontFamily: {
-                        sans: ['Prompt', 'sans-serif'],
-                        mono: ['Space Grotesk', 'monospace'],
+                        sans: ['Inter', 'Sarabun', 'sans-serif'],
                     }
                 }
             }
         }
     </script>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
 
     <style>
-        /* Custom UI Glassmorphism & Animations */
         body {
-            background-color: #07111F;
-            color: #FFFFFF;
-            font-family: 'Prompt', sans-serif;
-            overflow: hidden;
-            user-select: none;
-            -webkit-user-select: none;
-            touch-action: manipulation;
+            font-family: 'Inter', 'Sarabun', sans-serif;
+            overscroll-behavior-y: contain; /* Prevent pull-to-refresh on mobile */
+            -webkit-tap-highlight-color: transparent;
         }
-
+        
         .glass-panel {
-            background: rgba(15, 28, 48, 0.75);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-        }
-
-        .glass-card {
-            background: rgba(22, 38, 63, 0.65);
+            background: rgba(30, 41, 59, 0.7);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(0, 209, 255, 0.18);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        .glow-primary {
-            box-shadow: 0 0 20px rgba(0, 209, 255, 0.35);
+        .view-section {
+            display: none;
+            height: 100vh;
+            height: 100dvh;
+            width: 100vw;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .view-section.active {
+            display: flex;
+            flex-direction: column;
         }
 
-        .glow-success {
-            box-shadow: 0 0 20px rgba(38, 208, 124, 0.4);
+        /* Camera & AR Layers */
+        .ar-container {
+            position: relative;
+            width: 100%;
+            flex-grow: 1;
+            background-color: #000;
+            overflow: hidden;
+        }
+        
+        .ar-video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+        
+        .ar-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; /* Let clicks pass to video if needed */
         }
 
-        /* Animated Pulsing target node */
-        @keyframes pulse-ring {
-            0% { transform: scale(0.9); opacity: 0.8; }
-            50% { transform: scale(1.3); opacity: 0.3; }
-            100% { transform: scale(0.9); opacity: 0.8; }
+        .ar-interactive {
+            pointer-events: auto; /* Enable interaction for editor */
         }
 
-        .pulse-node {
-            animation: pulse-ring 2s infinite ease-in-out;
-        }
-
-        /* Rope canvas interaction */
-        #ar-canvas {
-            touch-action: none;
-        }
-
-        /* Wood desk grid pattern for fallback simulation */
-        .desk-fallback {
-            background-color: #0b182b;
+        /* Grid Overlay */
+        .grid-overlay {
             background-image: 
-                radial-gradient(rgba(0, 209, 255, 0.1) 1px, transparent 1px),
-                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-            background-size: 20px 20px, 40px 40px, 40px 40px;
+                linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px);
+            background-size: 33.33% 33.33%;
+            z-index: 2;
+        }
+        
+        .center-crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: rgba(255, 255, 255, 0.5);
+            z-index: 3;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155; 
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569; 
+        }
+
+        /* SVG Editor Nodes */
+        .path-node {
+            cursor: grab;
+            transition: r 0.2s;
+        }
+        .path-node:hover {
+            r: 12;
+        }
+        .path-node:active {
+            cursor: grabbing;
         }
     </style>
 </head>
-<body class="h-full w-full select-none overflow-hidden relative">
+<body class="bg-darkBg text-white antialiased overflow-hidden select-none">
 
-    <!-- APP WRAPPER -->
-    <div id="app" class="relative w-full h-full flex flex-col justify-between overflow-hidden">
-        
-        <!-- ========================================== -->
-        <!-- VIEW 1: DASHBOARD / HOME -->
-        <!-- ========================================== -->
-        <section id="view-dashboard" class="absolute inset-0 z-20 flex flex-col justify-between p-5 md:p-8 bg-gradient-to-b from-[#07111F] via-[#0b1b33] to-[#050b14] overflow-y-auto">
-            <!-- Header -->
-            <div class="flex items-center justify-between mt-2">
-                <div class="flex items-center space-x-3">
-                    <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-arPrimary to-blue-600 flex items-center justify-center glow-primary">
-                        <i class="fa-solid fa-ring text-2xl text-white"></i>
-                    </div>
-                    <div>
-                        <h1 class="text-2xl font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-arPrimary to-white">
-                            AR KNOT TRAINER
-                        </h1>
-                        <p class="text-xs text-slate-400">ฝึกจำและจำลองการผูกเชือกด้วย AR</p>
-                    </div>
+    <section id="view-dashboard" class="view-section active">
+        <header class="p-6 pb-2">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-purple-400">AR RopePath</h1>
+                    <p class="text-sm text-gray-400">ระบบบันทึกและฝึกฝนเงื่อนเชือก</p>
                 </div>
-                <button onclick="app.showSettings()" class="w-10 h-10 rounded-xl glass-panel flex items-center justify-center text-slate-300 hover:text-white transition">
-                    <i class="fa-solid fa-gear text-lg"></i>
+                <button onclick="App.switchView('settings')" class="p-2 rounded-full bg-darkCard hover:bg-gray-700 transition">
+                    <i class="ph ph-gear text-xl"></i>
+                </button>
+            </div>
+        </header>
+
+        <main class="flex-grow p-6 overflow-y-auto">
+            <!-- Stats -->
+            <div class="grid grid-cols-2 gap-4 mb-8">
+                <div class="bg-darkCard p-4 rounded-2xl border border-gray-800">
+                    <div class="text-gray-400 text-sm mb-1">เงื่อนทั้งหมด</div>
+                    <div class="text-3xl font-bold text-white" id="stat-total-knots">0</div>
+                </div>
+                <div class="bg-darkCard p-4 rounded-2xl border border-gray-800">
+                    <div class="text-gray-400 text-sm mb-1">ความแม่นยำเฉลี่ย</div>
+                    <div class="text-3xl font-bold text-secondary">--%</div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex gap-4 mb-8">
+                <button onclick="App.startRecording()" class="flex-1 bg-primary hover:bg-indigo-500 text-white p-4 rounded-2xl flex flex-col items-center justify-center transition shadow-lg shadow-indigo-500/20">
+                    <i class="ph ph-video-camera text-3xl mb-2"></i>
+                    <span class="font-medium">สร้างต้นแบบใหม่</span>
+                </button>
+                <button onclick="App.switchView('library')" class="flex-1 bg-darkCard hover:bg-gray-700 border border-gray-700 text-white p-4 rounded-2xl flex flex-col items-center justify-center transition">
+                    <i class="ph ph-books text-3xl mb-2"></i>
+                    <span class="font-medium">คลังเงื่อนเชือก</span>
                 </button>
             </div>
 
-            <!-- Stats Banner -->
-            <div class="my-6 grid grid-cols-2 gap-4">
-                <div class="glass-card p-4 rounded-2xl border border-arPrimary/20 flex flex-col items-center">
-                    <span class="text-xs text-slate-400 mb-1">คะแนนสูงสุด</span>
-                    <span id="dash-high-score" class="text-3xl font-bold font-mono text-arPrimary">0</span>
-                    <span class="text-[10px] text-slate-500 mt-1">คะแนนประเมินรวม</span>
-                </div>
-                <div class="glass-card p-4 rounded-2xl border border-arPrimary/20 flex flex-col items-center">
-                    <span class="text-xs text-slate-400 mb-1">ฝึกฝนแล้ว</span>
-                    <span id="dash-total-sessions" class="text-3xl font-bold font-mono text-arSuccess">0</span>
-                    <span class="text-[10px] text-slate-500 mt-1">ครั้ง</span>
-                </div>
-            </div>
-
-            <!-- Active Selected Knot Card -->
-            <div class="glass-panel p-5 rounded-3xl relative overflow-hidden mb-6 border border-white/10">
-                <div class="flex justify-between items-start mb-3">
-                    <span id="current-knot-badge" class="px-3 py-1 rounded-full text-xs font-semibold bg-arPrimary/20 text-arPrimary border border-arPrimary/40">
-                        ระดับ ★&#9733;&#9734;&#9734;&#9734;
-                    </span>
-                    <button onclick="app.showKnotSelector()" class="text-xs text-arPrimary font-medium flex items-center space-x-1 hover:underline">
-                        <span>เปลี่ยนเงื่อน</span>
-                        <i class="fa-solid fa-chevron-right text-[10px]"></i>
-                    </button>
-                </div>
-                <h2 id="current-knot-name" class="text-2xl font-bold text-white mb-1">ปมพิรอด (Square Knot)</h2>
-                <p id="current-knot-desc" class="text-xs text-slate-300 mb-4 line-clamp-2">การผูกเชือกสองปลายที่มีขนาดเท่ากัน เหมาะสำหรับมัดสิ่งของหรือปฐมพยาบาล</p>
-                
-                <div class="flex items-center space-x-2 text-xs text-slate-400 bg-slate-900/50 p-2.5 rounded-xl">
-                    <i class="fa-solid fa-route text-arPrimary"></i>
-                    <span id="current-knot-steps-count">5 ขั้นตอนการลากเส้นทาง</span>
-                </div>
-            </div>
-
-            <!-- Action Buttons -->
-            <div class="space-y-3 mb-4">
-                <button onclick="app.startTraining()" class="w-full py-4 rounded-2xl bg-gradient-to-r from-arPrimary to-blue-600 font-bold text-lg text-slate-950 shadow-lg glow-primary flex items-center justify-center space-x-3 active:scale-95 transition">
-                    <i class="fa-solid fa-camera-rotate text-xl"></i>
-                    <span>เริ่มฝึกด้วย AR</span>
-                </button>
-                
-                <div class="grid grid-cols-2 gap-3">
-                    <button onclick="app.startDemoMode()" class="py-3 px-4 rounded-xl glass-panel text-sm font-semibold text-white flex items-center justify-center space-x-2 active:scale-95 transition">
-                        <i class="fa-solid fa-play text-arSuccess"></i>
-                        <span>ดูวิธีผูก (Demo)</span>
-                    </button>
-                    <button onclick="app.showSafetyModal()" class="py-3 px-4 rounded-xl glass-panel text-sm font-semibold text-slate-300 flex items-center justify-center space-x-2 active:scale-95 transition">
-                        <i class="fa-solid fa-shield-halved text-arWarning"></i>
-                        <span>ข้อควรระวัง</span>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Safety Footer Note -->
-            <div class="text-center text-[11px] text-slate-500">
-                <p>คำเตือน: แอปนี้ใช้สำหรับฝึกจำลำดับขั้นตอนเท่านั้น การใช้งานจริงควรอยู่ในความดูแลของผู้เชี่ยวชาญ</p>
-            </div>
-        </section>
-
-
-        <!-- ========================================== -->
-        <!-- VIEW 2: KNOT SELECTOR MODAL / VIEW -->
-        <!-- ========================================== -->
-        <section id="view-knots" class="hidden absolute inset-0 z-30 bg-arBg/95 backdrop-blur-xl p-5 flex flex-col justify-between">
+            <!-- Recent Knots -->
             <div>
-                <div class="flex items-center justify-between mb-6">
-                    <button onclick="app.showDashboard()" class="w-10 h-10 rounded-xl glass-panel flex items-center justify-center text-slate-300">
-                        <i class="fa-solid fa-arrow-left"></i>
-                    </button>
-                    <h2 class="text-lg font-bold text-white">เลือกปมเชือกที่ต้องการฝึก</h2>
-                    <div class="w-10"></div>
+                <div class="flex justify-between items-end mb-4">
+                    <h2 class="text-lg font-semibold">ต้นแบบล่าสุด</h2>
+                    <button onclick="App.switchView('library')" class="text-sm text-primary">ดูทั้งหมด</button>
                 </div>
-
-                <!-- Knot List Container -->
-                <div id="knot-list" class="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
-                    <!-- Dynamic rendering via JS -->
+                <div id="recent-knots-list" class="space-y-3">
+                    <!-- Populated by JS -->
                 </div>
             </div>
+        </main>
+    </section>
 
-            <button onclick="app.showDashboard()" class="w-full py-3.5 rounded-xl glass-panel font-bold text-slate-300">
-                ย้อนกลับ
-            </button>
-        </section>
+    <section id="view-recorder" class="view-section">
+        <!-- AR Container -->
+        <div class="ar-container">
+            <video id="recorder-video" class="ar-video" autoplay playsinline muted></video>
+            <!-- Hidden canvas for computer vision processing -->
+            <canvas id="cv-canvas" class="hidden"></canvas>
+            
+            <!-- AR Overlays -->
+            <div class="ar-overlay grid-overlay absolute inset-0 hidden" id="recorder-grid"></div>
+            <i class="ph ph-crosshair center-crosshair text-4xl hidden" id="recorder-crosshair"></i>
+            
+            <!-- Drawing Canvas (Live feedback) -->
+            <canvas id="recorder-overlay" class="ar-overlay"></canvas>
 
-
-        <!-- ========================================== -->
-        <!-- VIEW 3: AR CAMERA & OVERLAY TRAINING VIEW -->
-        <!-- ========================================== -->
-        <section id="view-ar" class="hidden absolute inset-0 z-10 flex flex-col justify-between bg-black">
-            <!-- Camera Video Feed & Desk Fallback Background -->
-            <div id="ar-viewport" class="absolute inset-0 w-full h-full overflow-hidden desk-fallback">
-                <video id="ar-video" class="w-full h-full object-cover hidden" playsinline autoplay muted></video>
-                <canvas id="ar-canvas" class="absolute inset-0 w-full h-full z-10"></canvas>
-            </div>
-
-            <!-- Top Glass HUD Header -->
-            <div class="relative z-20 p-4 flex items-center justify-between glass-panel border-b border-white/10 m-3 rounded-2xl">
-                <button onclick="app.confirmExitTraining()" class="w-9 h-9 rounded-xl bg-slate-900/80 flex items-center justify-center text-slate-300 active:scale-90 transition">
-                    <i class="fa-solid fa-xmark text-lg"></i>
+            <!-- Top HUD -->
+            <div class="absolute top-0 left-0 w-full p-4 flex justify-between items-start z-20 bg-gradient-to-b from-black/70 to-transparent">
+                <button onclick="App.stopRecordingAndExit()" class="w-10 h-10 rounded-full bg-black/50 backdrop-blur flex items-center justify-center text-white">
+                    <i class="ph ph-x text-xl"></i>
                 </button>
-                <div class="text-center">
-                    <h3 id="ar-knot-title" class="text-sm font-bold text-arPrimary">ปมพิรอด</h3>
-                    <div class="flex items-center space-x-2 text-xs text-slate-300">
-                        <span>ขั้นตอนที่</span>
-                        <span id="ar-step-counter" class="font-bold font-mono text-white">1/5</span>
+                
+                <div class="flex flex-col items-end">
+                    <div class="bg-black/50 backdrop-blur rounded-full px-3 py-1 text-xs font-mono text-green-400 mb-2 flex items-center gap-2">
+                        <span id="recorder-fps">0</span> FPS
+                        <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse hidden" id="recording-indicator"></div>
                     </div>
-                </div>
-                <button onclick="app.toggleHelpGhost()" id="btn-ghost-toggle" class="px-2.5 py-1.5 rounded-xl bg-arPrimary/20 border border-arPrimary/40 text-arPrimary text-xs font-semibold flex items-center space-x-1">
-                    <i class="fa-solid fa-ghost"></i>
-                    <span>ตัวช่วย</span>
-                </button>
-            </div>
-
-            <!-- Floating Step Instruction Banner -->
-            <div class="relative z-20 px-4">
-                <div id="instruction-card" class="glass-card p-3.5 rounded-2xl text-center border border-arPrimary/30 transition-all duration-300">
-                    <div id="instruction-text" class="text-sm font-semibold text-white">
-                        นำปลายเชือกด้านขวาพาดเหนือด้านซ้าย
-                    </div>
-                    <div id="instruction-sub" class="text-xs text-arPrimary mt-1 flex items-center justify-center space-x-1">
-                        <i class="fa-solid fa-hand-pointer text-[11px] animate-bounce"></i>
-                        <span>ลากนิ้วจากจุด START ไปตามลูกศร</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Bottom Floating Controls HUD -->
-            <div class="relative z-20 p-4 space-y-3 mb-2">
-                <!-- Status Feedback Badge -->
-                <div id="ar-status-toast" class="hidden text-center py-2 px-4 rounded-full text-xs font-bold transition-all mx-auto w-max shadow-lg">
-                    กำลังตรวจสอบ...
-                </div>
-
-                <div class="flex items-center justify-between space-x-2">
-                    <button onclick="app.resetCurrentStep()" class="flex-1 py-3 px-3 rounded-xl glass-panel text-xs font-semibold text-slate-300 flex items-center justify-center space-x-1.5 active:scale-95 transition">
-                        <i class="fa-solid fa-rotate-left"></i>
-                        <span>เริ่มขั้นตอนใหม่</span>
-                    </button>
-                    <button onclick="app.openCalibration()" class="py-3 px-3 rounded-xl glass-panel text-xs font-semibold text-slate-300 flex items-center justify-center space-x-1.5 active:scale-95 transition">
-                        <i class="fa-solid fa-sliders text-arPrimary"></i>
-                        <span>ปรับตำแหน่ง AR</span>
-                    </button>
-                    <button onclick="app.toggleCameraFallback()" id="btn-camera-toggle" class="py-3 px-3 rounded-xl glass-panel text-xs font-semibold text-slate-300 flex items-center justify-center space-x-1.5 active:scale-95 transition">
-                        <i class="fa-solid fa-camera"></i>
-                        <span id="camera-btn-text">โหมดตั้งโต๊ะ</span>
+                    <button onclick="Camera.switchCamera()" class="w-10 h-10 rounded-full bg-black/50 backdrop-blur flex items-center justify-center text-white">
+                        <i class="ph ph-camera-rotate text-xl"></i>
                     </button>
                 </div>
             </div>
-        </section>
 
-
-        <!-- ========================================== -->
-        <!-- VIEW 4: CALIBRATION MODAL -->
-        <!-- ========================================== -->
-        <section id="view-calibration" class="hidden absolute inset-0 z-40 bg-black/80 backdrop-blur-md p-5 flex flex-col justify-between">
-            <div class="text-center mt-6">
-                <h3 class="text-lg font-bold text-white mb-1">การปรับตำแหน่งเส้นเชือก AR</h3>
-                <p class="text-xs text-slate-400">วางตำแหน่งเชือกจริงให้ตรงกับกรอบอ้างอิงบนหน้าจอ</p>
-            </div>
-
-            <!-- Target Outline Frame -->
-            <div class="w-full h-60 border-2 border-dashed border-arPrimary/70 rounded-3xl flex items-center justify-center relative my-auto">
-                <div class="text-center text-arPrimary/60 text-xs">
-                    <i class="fa-solid fa-expand text-3xl mb-2"></i>
-                    <p>กรอบอ้างอิงเชือก AR</p>
-                </div>
-            </div>
-
-            <!-- Controls -->
-            <div class="glass-panel p-4 rounded-2xl space-y-3 mb-4">
-                <div class="flex items-center justify-between text-xs text-slate-300">
-                    <span>ขยาย/ย่อขนาด (Scale):</span>
-                    <input id="calib-scale" type="range" min="0.5" max="1.5" step="0.05" value="1.0" class="w-1/2 accent-arPrimary" oninput="app.updateCalibration()">
-                </div>
-                <div class="flex items-center justify-between text-xs text-slate-300">
-                    <span>หมุนระนาบ (Rotation):</span>
-                    <input id="calib-rotation" type="range" min="-180" max="180" step="5" value="0" class="w-1/2 accent-arPrimary" oninput="app.updateCalibration()">
-                </div>
-                <button onclick="app.closeCalibration()" class="w-full py-3 rounded-xl bg-arPrimary text-slate-950 font-bold text-sm">
-                    เสร็จสิ้นการปรับ
+            <!-- Bottom Controls -->
+            <div class="absolute bottom-0 left-0 w-full p-8 pb-12 flex justify-center items-center z-20 glass-panel">
+                <button id="btn-record" onclick="App.toggleRecording()" class="w-20 h-20 rounded-full border-4 border-white/50 flex items-center justify-center transition-all duration-300">
+                    <div class="w-16 h-16 rounded-full bg-red-500 transition-all duration-300" id="btn-record-inner"></div>
                 </button>
             </div>
-        </section>
-
-
-        <!-- ========================================== -->
-        <!-- VIEW 5: RESULTS VIEW -->
-        <!-- ========================================== -->
-        <section id="view-results" class="hidden absolute inset-0 z-30 bg-gradient-to-b from-[#07111F] via-[#09182d] to-[#050b14] p-6 flex flex-col justify-between overflow-y-auto">
-            <div class="text-center mt-4">
-                <div class="w-20 h-20 rounded-full bg-arSuccess/20 border-2 border-arSuccess flex items-center justify-center mx-auto mb-3 glow-success">
-                    <i class="fa-solid fa-trophy text-3xl text-arSuccess"></i>
-                </div>
-                <span id="result-grade-tag" class="px-3 py-1 rounded-full text-xs font-bold bg-arSuccess/20 text-arSuccess border border-arSuccess/40">
-                    EXCELLENT
-                </span>
-                <h2 id="result-title" class="text-2xl font-bold text-white mt-2">ฝึกผูกปมสำเร็จ!</h2>
-                <p id="result-knot-name" class="text-sm text-slate-400">ปมพิรอด (Square Knot)</p>
-            </div>
-
-            <!-- Score breakdown Card -->
-            <div class="glass-panel p-5 rounded-3xl my-6 border border-white/10 space-y-4">
-                <div class="text-center">
-                    <span class="text-xs text-slate-400">คะแนนการฝึกฝน</span>
-                    <div id="result-total-score" class="text-5xl font-extrabold font-mono text-arPrimary my-1">94</div>
-                    <span class="text-xs text-slate-400">เต็ม 100 คะแนน</span>
-                </div>
-
-                <div class="border-t border-white/10 pt-4 space-y-2.5 text-xs">
-                    <div class="flex justify-between items-center text-slate-300">
-                        <span>ความแม่นยำเส้นทาง (Accuracy):</span>
-                        <span id="result-accuracy" class="font-mono font-bold text-arSuccess">96%</span>
-                    </div>
-                    <div class="flex justify-between items-center text-slate-300">
-                        <span>ทิศทางการลาก (Direction):</span>
-                        <span id="result-direction" class="font-mono font-bold text-arPrimary">100%</span>
-                    </div>
-                    <div class="flex justify-between items-center text-slate-300">
-                        <span>เวลาที่ใช้ (Time Taken):</span>
-                        <span id="result-time" class="font-mono font-bold text-white">12.4 วินาที</span>
-                    </div>
-                    <div class="flex justify-between items-center text-slate-300">
-                        <span>จำนวนครั้งที่ผิดพลาด:</span>
-                        <span id="result-errors" class="font-mono font-bold text-arWarning">1 ครั้ง</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Buttons -->
-            <div class="space-y-3 mb-2">
-                <button onclick="app.startTraining()" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-arPrimary to-blue-600 font-bold text-slate-950 flex items-center justify-center space-x-2">
-                    <i class="fa-solid fa-rotate-right"></i>
-                    <span>ฝึกซ้ำอีกครั้ง</span>
-                </button>
-                <button onclick="app.showDashboard()" class="w-full py-3.5 rounded-2xl glass-panel font-bold text-slate-300">
-                    กลับหน้าหลัก
-                </button>
-            </div>
-        </section>
-
-
-        <!-- ========================================== -->
-        <!-- VIEW 6: SETTINGS MODAL -->
-        <!-- ========================================== -->
-        <section id="view-settings" class="hidden absolute inset-0 z-40 bg-arBg/95 backdrop-blur-xl p-5 flex flex-col justify-between">
-            <div>
-                <div class="flex items-center justify-between mb-6">
-                    <button onclick="app.closeSettings()" class="w-10 h-10 rounded-xl glass-panel flex items-center justify-center text-slate-300">
-                        <i class="fa-solid fa-arrow-left"></i>
-                    </button>
-                    <h2 class="text-lg font-bold text-white">การตั้งค่า (Settings)</h2>
-                    <div class="w-10"></div>
-                </div>
-
-                <div class="space-y-4 text-sm">
-                    <div class="glass-panel p-4 rounded-2xl flex items-center justify-between">
-                        <div class="flex items-center space-x-3">
-                            <i class="fa-solid fa-volume-high text-arPrimary"></i>
-                            <span>เสียงคำแนะนำ (Voice TTS)</span>
-                        </div>
-                        <input id="setting-sound" type="checkbox" checked class="w-5 h-5 accent-arPrimary" onchange="app.saveSettings()">
-                    </div>
-
-                    <div class="glass-panel p-4 rounded-2xl flex items-center justify-between">
-                        <div class="flex items-center space-x-3">
-                            <i class="fa-solid fa-mobile-retro text-arPrimary"></i>
-                            <span>แรงสั่นตอบสนอง (Vibration)</span>
-                        </div>
-                        <input id="setting-vibration" type="checkbox" checked class="w-5 h-5 accent-arPrimary" onchange="app.saveSettings()">
-                    </div>
-
-                    <div class="glass-panel p-4 rounded-2xl flex items-center justify-between">
-                        <div class="flex items-center space-x-3">
-                            <i class="fa-solid fa-eye text-arPrimary"></i>
-                            <span>แสดงเส้นช่วยจำ (Ghost Line)</span>
-                        </div>
-                        <input id="setting-ghost" type="checkbox" checked class="w-5 h-5 accent-arPrimary" onchange="app.saveSettings()">
-                    </div>
-                </div>
-            </div>
-
-            <button onclick="app.closeSettings()" class="w-full py-3.5 rounded-xl bg-arPrimary text-slate-950 font-bold">
-                บันทึกและย้อนกลับ
-            </button>
-        </section>
-
-        <!-- SAFETY MODAL -->
-        <div id="modal-safety" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-5">
-            <div class="glass-card max-w-sm p-6 rounded-3xl border border-arWarning/40 text-center space-y-4">
-                <div class="w-14 h-14 rounded-2xl bg-arWarning/20 border border-arWarning/40 flex items-center justify-center mx-auto text-arWarning text-2xl">
-                    <i class="fa-solid fa-triangle-exclamation"></i>
-                </div>
-                <h3 class="text-lg font-bold text-white">ข้อควรระวังเพื่อความปลอดภัย</h3>
-                <p class="text-xs text-slate-300 leading-relaxed text-left">
-                    1. แอปพลิเคชันนี้ออกแบบมาเพื่อ **ฝึกจำขั้นตอนการผูกเชือก** เท่านั้น<br>
-                    2. การนำไปใชกับงานความสูง การกู้ภัย หรือการผูกมัดจริง ต้องได้รับการฝึกฝนอย่างถูกต้องจากผู้เชี่ยวชาญ<br>
-                    3. โปรดสังเกตสิ่งกีดขวางรอบตัวขณะใช้งานกล้อง AR
-                </p>
-                <button onclick="app.hideSafetyModal()" class="w-full py-3 rounded-xl bg-arWarning text-slate-950 font-bold text-sm">
-                    รับทราบและเข้าใจแล้ว
-                </button>
+            
+            <!-- Debug Info -->
+            <div id="recorder-debug" class="absolute bottom-32 left-4 text-xs text-yellow-300 font-mono z-20 bg-black/50 p-2 rounded hidden">
+                Points: <span id="debug-pts">0</span>
             </div>
         </div>
-
-    </div>
-
-    <!-- JavaScript Application Logic -->
-    <script>
-
-        // ==========================================
-        // 1. KNOT DEFINITIONS DATABASE
-        // Extensible structure supporting multiple steps, paths & waypoints
-        // Normalized coordinates (0.0 to 1.0 relative to canvas width/height)
-        // ==========================================
-        const KNOT_DATABASE = [
-            {
-                id: "square-knot",
-                name: "ปมพิรอด (Square Knot)",
-                difficulty: 2,
-                description: "ใช้มัดปลายเชือก 2 เส้นที่มีขนาดเท่ากัน เหมาะสำหรับการต่อเชือกทั่วไปและงานปฐมพยาบาล",
-                steps: [
-                    {
-                        id: 1,
-                        instruction: "ไขว้เชือกขวาพาดทับเชือกซ้าย",
-                        subInstruction: "ลากเส้นทางจากขวาไปซ้ายตามลูกศร",
-                        direction: "LEFT",
-                        start: { x: 0.75, y: 0.45 },
-                        end: { x: 0.25, y: 0.45 },
-                        waypoints: [{ x: 0.50, y: 0.45 }]
-                    },
-                    {
-                        id: 2,
-                        instruction: "ม้วนปลายเชือกลอดใต้เส้นเชือกหนึ่งรอบ",
-                        subInstruction: "ลากโค้งลงด้านล่างแล้วอ้อมขึ้นบน",
-                        direction: "DOWN_LEFT",
-                        start: { x: 0.25, y: 0.45 },
-                        end: { x: 0.45, y: 0.60 },
-                        waypoints: [{ x: 0.30, y: 0.58 }]
-                    },
-                    {
-                        id: 3,
-                        instruction: "ไขว้เชือกซ้ายพาดทับเชือกขวา (ตรงข้ามรอบแรก)",
-                        subInstruction: "ลากเส้นทางจากซ้ายไปขวา",
-                        direction: "RIGHT",
-                        start: { x: 0.25, y: 0.60 },
-                        end: { x: 0.75, y: 0.60 },
-                        waypoints: [{ x: 0.50, y: 0.60 }]
-                    },
-                    {
-                        id: 4,
-                        instruction: "ม้วนปลายเชือกลอดใต้ช่องแล้วดึงให้แน่น",
-                        subInstruction: "ลากลงเพื่อลอดรูเชือกแล้วดึงแยกออกสองข้าง",
-                        direction: "DOWN_RIGHT",
-                        start: { x: 0.75, y: 0.60 },
-                        end: { x: 0.55, y: 0.45 },
-                        waypoints: [{ x: 0.65, y: 0.55 }]
-                    }
-                ]
-            },
-            {
-                id: "clove-hitch",
-                name: "ปมตะกรุดเบ็ด (Clove Hitch)",
-                difficulty: 2,
-                description: "ใช้ผูกเชือกกับเสาหรือพืช ผูกง่าย แก้สะดวก เหมาะกับการเริ่มต้นสร้างพูกซุง",
-                steps: [
-                    {
-                        id: 1,
-                        instruction: "หมุนเชือกรอบเสาหนึ่งรอบจากซ้ายไปขวา",
-                        subInstruction: "ลากโค้งวงกลมพาดผ่านเสา",
-                        direction: "RIGHT",
-                        start: { x: 0.30, y: 0.40 },
-                        end: { x: 0.70, y: 0.40 },
-                        waypoints: [{ x: 0.50, y: 0.35 }]
-                    },
-                    {
-                        id: 2,
-                        instruction: "พันเชือกรอบสองเฉียงขึ้นทับเส้นแรก",
-                        subInstruction: "ลากเชือกไขว้ขึ้นไปด้านบนขวา",
-                        direction: "UP_RIGHT",
-                        start: { x: 0.70, y: 0.40 },
-                        end: { x: 0.40, y: 0.65 },
-                        waypoints: [{ x: 0.60, y: 0.55 }]
-                    },
-                    {
-                        id: 3,
-                        instruction: "สอดปลายเชือกลอดใต้บ่วงรอบสุดท้ายแล้วดึงดึงกระชับ",
-                        subInstruction: "ลากสอดลอดใต้บ่วงตรงกลาง",
-                        direction: "UP_LEFT",
-                        start: { x: 0.40, y: 0.65 },
-                        end: { x: 0.60, y: 0.45 },
-                        waypoints: [{ x: 0.50, y: 0.55 }]
-                    }
-                ]
-            },
-            {
-                id: "bowline",
-                name: "ปมเก้าอี้ (Bowline Knot)",
-                difficulty: 3,
-                description: "ราชาแห่งปมเชือก สร้างบ่วงที่ไม่รูดดึงแน่น ใช้ช่วยชีวิตหรือคล้องวัตถุ",
-                steps: [
-                    {
-                        id: 1,
-                        instruction: "สร้างบ่วงเล็กๆ (บ่วงงูออกจากรู)",
-                        subInstruction: "หมุนลากบ่วงเป็นวงกลม",
-                        direction: "DOWN",
-                        start: { x: 0.50, y: 0.35 },
-                        end: { x: 0.50, y: 0.50 },
-                        waypoints: [{ x: 0.58, y: 0.42 }]
-                    },
-                    {
-                        id: 2,
-                        instruction: "นำปลายเชือกลอดขึ้นมาจากใต้บ่วง (งูออกจากรู)",
-                        subInstruction: "ลากตรงขึ้นจากด้านล่าง",
-                        direction: "UP",
-                        start: { x: 0.50, y: 0.65 },
-                        end: { x: 0.50, y: 0.45 },
-                        waypoints: [{ x: 0.50, y: 0.55 }]
-                    },
-                    {
-                        id: 3,
-                        instruction: "อ้อมอ้อมหลังลำเชือกหลัก (งูอ้อมต้นไม้)",
-                        subInstruction: "ลากอ้อมไปด้านหลังขวา",
-                        direction: "RIGHT",
-                        start: { x: 0.50, y: 0.45 },
-                        end: { x: 0.70, y: 0.45 },
-                        waypoints: [{ x: 0.60, y: 0.40 }]
-                    },
-                    {
-                        id: 4,
-                        instruction: "ม้วนกลับลงสอดเข้าบ่วงเดิม (งูกลับลงรู)",
-                        subInstruction: "ลากกลับลงสอดเข้าบ่วงแล้วดึงดึงกระชับ",
-                        direction: "DOWN_LEFT",
-                        start: { x: 0.70, y: 0.45 },
-                        end: { x: 0.50, y: 0.65 },
-                        waypoints: [{ x: 0.60, y: 0.58 }]
-                    }
-                ]
-            }
-        ];
-
-        // ==========================================
-        // 2. AUDIO SYNTHESIZER & HAPTICS UTILITY
-        // Web Audio API for custom SFX tones
-        // ==========================================
-        class SoundEngine {
-            constructor() {
-                this.ctx = null;
-            }
-
-            init() {
-                if (!this.ctx) {
-                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-                }
-            }
-
-            playSuccess() {
-                if (!app.settings.sound) return;
-                this.init();
-                const now = this.ctx.currentTime;
-                const osc = this.ctx.createOscillator();
-                const gain = this.ctx.createGain();
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(523.25, now); // C5
-                osc.frequency.exponentialRampToValueAtTime(880, now + 0.15); // A5
-                gain.gain.setValueAtTime(0.2, now);
-                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-                osc.connect(gain);
-                gain.connect(this.ctx.destination);
-                osc.start(now);
-                osc.stop(now + 0.2);
-            }
-
-            playError() {
-                if (!app.settings.sound) return;
-                this.init();
-                const now = this.ctx.currentTime;
-                const osc = this.ctx.createOscillator();
-                const gain = this.ctx.createGain();
-                osc.type = 'sawtooth';
-                osc.frequency.setValueAtTime(180, now);
-                osc.frequency.setValueAtTime(140, now + 0.1);
-                gain.gain.setValueAtTime(0.25, now);
-                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
-                osc.connect(gain);
-                gain.connect(this.ctx.destination);
-                osc.start(now);
-                osc.stop(now + 0.25);
-            }
-
-            playComplete() {
-                if (!app.settings.sound) return;
-                this.init();
-                const notes = [523.25, 659.25, 783.99, 1046.50];
-                notes.forEach((freq, idx) => {
-                    const now = this.ctx.currentTime + (idx * 0.08);
-                    const osc = this.ctx.createOscillator();
-                    const gain = this.ctx.createGain();
-                    osc.frequency.setValueAtTime(freq, now);
-                    gain.gain.setValueAtTime(0.2, now);
-                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-                    osc.connect(gain);
-                    gain.connect(this.ctx.destination);
-                    osc.start(now);
-                    osc.stop(now + 0.2);
-                });
-            }
-
-            speak(text) {
-                if (!app.settings.sound || !('speechSynthesis' in window)) return;
-                try {
-                    window.speechSynthesis.cancel();
-                    const uttr = new SpeechSynthesisUtterance(text);
-                    uttr.lang = 'th-TH';
-                    uttr.rate = 1.0;
-                    window.speechSynthesis.speak(uttr);
-                } catch(e) {}
-            }
-
-            vibrate(pattern = [50]) {
-                if (app.settings.vibration && navigator.vibrate) {
-                    navigator.vibrate(pattern);
-                }
-            }
-        }
-
-        const soundSynth = new SoundEngine();
-
-        // ==========================================
-        // 3. PATH VALIDATOR & DIRECTION ENGINE
-        // Calculates gesture accuracy, start radius, direction match & waypoints
-        // ==========================================
-        class PathValidator {
-            static getDistance(p1, p2) {
-                return Math.hypot(p2.x - p1.x, p2.y - p1.y);
-            }
-
-            static getDirectionVector(p1, p2) {
-                const dx = p2.x - p1.x;
-                const dy = p2.y - p1.y;
-                if (Math.hypot(dx, dy) < 0.02) return 'NEUTRAL';
-
-                const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-                
-                if (angle >= -22.5 && angle < 22.5) return 'RIGHT';
-                if (angle >= 22.5 && angle < 67.5) return 'DOWN_RIGHT';
-                if (angle >= 67.5 && angle < 112.5) return 'DOWN';
-                if (angle >= 112.5 && angle < 157.5) return 'DOWN_LEFT';
-                if (angle >= 157.5 || angle < -157.5) return 'LEFT';
-                if (angle >= -157.5 && angle < -112.5) return 'UP_LEFT';
-                if (angle >= -112.5 && angle < -67.5) return 'UP';
-                if (angle >= -67.5 && angle < -22.5) return 'UP_RIGHT';
-                
-                return 'NEUTRAL';
-            }
-
-            static validateStroke(userPoints, targetStep, canvasWidth, canvasHeight) {
-                if (!userPoints || userPoints.length < 2) return { isValid: false, reason: 'SHORT' };
-
-                const startRadiusLimit = 0.12; // 12% tolerance radius
-                const firstPt = userPoints[0];
-                const lastPt = userPoints[userPoints.length - 1];
-
-                // 1. Check Start Point Proximity
-                const distToStart = this.getDistance(firstPt, targetStep.start);
-                if (distToStart > startRadiusLimit) {
-                    return { isValid: false, reason: 'WRONG_START', detail: 'ไม่ได้เริ่มลากจากจุด START' };
-                }
-
-                // 2. Waypoints validation
-                let currentWaypointIdx = 0;
-                let deviationPenalties = 0;
-
-                for (let i = 0; i < userPoints.length; i++) {
-                    const pt = userPoints[i];
-                    if (targetStep.waypoints && targetStep.waypoints[currentWaypointIdx]) {
-                        const targetWp = targetStep.waypoints[currentWaypointIdx];
-                        if (this.getDistance(pt, targetWp) < 0.12) {
-                            currentWaypointIdx++;
-                        }
-                    }
-                }
-
-                // 3. Direction Accuracy
-                const userDir = this.getDirectionVector(firstPt, lastPt);
-                const isDirectionCorrect = (userDir === targetStep.direction || targetStep.direction === 'NEUTRAL');
-
-                // 4. Check End Point Proximity
-                const distToEnd = this.getDistance(lastPt, targetStep.end);
-                const isEndReached = distToEnd < 0.12;
-
-                const isComplete = isEndReached && (currentWaypointIdx >= (targetStep.waypoints ? targetStep.waypoints.length : 0));
-
-                return {
-                    isValid: isComplete,
-                    isEndReached: isEndReached,
-                    userDirection: userDir,
-                    isDirectionCorrect: isDirectionCorrect,
-                    waypointProgress: currentWaypointIdx,
-                    distToEnd: distToEnd,
-                    reason: isComplete ? 'SUCCESS' : 'INCOMPLETE'
-                };
-            }
-        }
-
-        // ==========================================
-        // 4. AR CANVAS OVERLAY & VISUAL ROPE RENDERER
-        // Handles 2D/AR rendering with high DPI scaling, ghost lines & textures
-        // ==========================================
-        class AROverlayRenderer {
-            constructor(canvas) {
-                this.canvas = canvas;
-                this.ctx = canvas.getContext('2d');
-                this.dpr = window.devicePixelRatio || 1;
-                this.userStroke = [];
-                this.ghostPhase = 0;
-                this.animationFrame = null;
-            }
-
-            resize() {
-                const rect = this.canvas.getBoundingClientRect();
-                this.canvas.width = rect.width * this.dpr;
-                this.canvas.height = rect.height * this.dpr;
-                this.ctx.scale(this.dpr, this.dpr);
-            }
-
-            clear() {
-                this.ctx.clearRect(0, 0, this.canvas.width / this.dpr, this.canvas.height / this.dpr);
-            }
-
-            render(step, calibration, isGhostEnabled) {
-                this.clear();
-                const w = this.canvas.width / this.dpr;
-                const h = this.canvas.height / this.dpr;
-
-                this.ctx.save();
-                
-                // Apply Calibration Transformations
-                this.ctx.translate(w / 2, h / 2);
-                this.ctx.scale(calibration.scale, calibration.scale);
-                this.ctx.rotate((calibration.rotation * Math.PI) / 180);
-                this.ctx.translate(-w / 2, -h / 2);
-
-                if (step) {
-                    // 1. Draw Target Step Path & Waypoints
-                    this.drawGuidePath(step, w, h);
-
-                    // 2. Draw Ghost Arrow Animation if enabled
-                    if (isGhostEnabled) {
-                        this.drawGhostAnimation(step, w, h);
-                    }
-
-                    // 3. Draw Nodes (Start, Waypoint, End)
-                    this.drawNodes(step, w, h);
-                }
-
-                // 4. Draw Real-Time Visual Rope Layer (User Drawn Stroke)
-                if (this.userStroke.length > 0) {
-                    this.drawRopeStroke(this.userStroke, w, h);
-                }
-
-                this.ctx.restore();
-            }
-
-            drawGuidePath(step, w, h) {
-                const ctx = this.ctx;
-                ctx.beginPath();
-                ctx.moveTo(step.start.x * w, step.start.y * h);
-
-                if (step.waypoints) {
-                    step.waypoints.forEach(wp => {
-                        ctx.lineTo(wp.x * w, wp.y * h);
-                    });
-                }
-                ctx.lineTo(step.end.x * w, step.end.y * h);
-
-                // Dotted Guide Path
-                ctx.lineWidth = 10;
-                ctx.strokeStyle = 'rgba(0, 209, 255, 0.35)';
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.setLineDash([12, 8]);
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-
-            drawGhostAnimation(step, w, h) {
-                this.ghostPhase = (this.ghostPhase + 0.02) % 1;
-                const ctx = this.ctx;
-
-                const startX = step.start.x * w;
-                const startY = step.start.y * h;
-                const endX = step.end.x * w;
-                const endY = step.end.y * h;
-
-                // Interpolated Moving Particle
-                const currentX = startX + (endX - startX) * this.ghostPhase;
-                const currentY = startY + (endY - startY) * this.ghostPhase;
-
-                ctx.beginPath();
-                ctx.arc(currentX, currentY, 12, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(0, 209, 255, 0.8)';
-                ctx.shadowColor = '#00D1FF';
-                ctx.shadowBlur = 15;
-                ctx.fill();
-                ctx.shadowBlur = 0;
-            }
-
-            drawNodes(step, w, h) {
-                const ctx = this.ctx;
-
-                // Start Point (Green Node)
-                const sX = step.start.x * w;
-                const sY = step.start.y * h;
-                
-                ctx.beginPath();
-                ctx.arc(sX, sY, 22, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(38, 208, 124, 0.25)';
-                ctx.fill();
-
-                ctx.beginPath();
-                ctx.arc(sX, sY, 12, 0, Math.PI * 2);
-                ctx.fillStyle = '#26D07C';
-                ctx.fill();
-                ctx.lineWidth = 3;
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.stroke();
-
-                ctx.font = 'bold 12px Prompt';
-                ctx.fillStyle = '#FFFFFF';
-                ctx.textAlign = 'center';
-                ctx.fillText('START', sX, sY - 26);
-
-                // End Point (Red Node)
-                const eX = step.end.x * w;
-                const eY = step.end.y * h;
-
-                ctx.beginPath();
-                ctx.arc(eX, eY, 14, 0, Math.PI * 2);
-                ctx.fillStyle = '#FF4D5E';
-                ctx.fill();
-                ctx.lineWidth = 3;
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.stroke();
-
-                ctx.fillText('END', eX, eY - 22);
-
-                // Waypoints
-                if (step.waypoints) {
-                    step.waypoints.forEach(wp => {
-                        const wpX = wp.x * w;
-                        const wpY = wp.y * h;
-                        ctx.beginPath();
-                        ctx.arc(wpX, wpY, 8, 0, Math.PI * 2);
-                        ctx.fillStyle = '#FFB020';
-                        ctx.fill();
-                    });
-                }
-            }
-
-            drawRopeStroke(points, w, h) {
-                if (points.length < 2) return;
-                const ctx = this.ctx;
-
-                // 1. Shadow
-                ctx.beginPath();
-                ctx.moveTo(points[0].x * w, points[0].y * h + 4);
-                for (let i = 1; i < points.length; i++) {
-                    ctx.lineTo(points[i].x * w, points[i].y * h + 4);
-                }
-                ctx.lineWidth = 18;
-                ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.stroke();
-
-                // 2. Main Rope Core
-                ctx.beginPath();
-                ctx.moveTo(points[0].x * w, points[0].y * h);
-                for (let i = 1; i < points.length; i++) {
-                    ctx.lineTo(points[i].x * w, points[i].y * h);
-                }
-                ctx.lineWidth = 14;
-                ctx.strokeStyle = '#D2B48C'; // Hemp rope beige color
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.stroke();
-
-                // 3. Rope Twist Highlight Strand
-                ctx.beginPath();
-                ctx.moveTo(points[0].x * w, points[0].y * h);
-                for (let i = 1; i < points.length; i++) {
-                    ctx.lineTo(points[i].x * w, points[i].y * h);
-                }
-                ctx.lineWidth = 4;
-                ctx.strokeStyle = '#F5DEB3';
-                ctx.stroke();
-            }
-        }
-
-        // ==========================================
-        // 5. MAIN APPLICATION CONTROLLER
-        // Router, State, Camera permissions, Gesture Tracking & Analytics
-        // ==========================================
-        class AppController {
-            constructor() {
-                this.currentKnot = KNOT_DATABASE[0];
-                this.currentStepIdx = 0;
-                this.userStroke = [];
-                this.isDrawing = false;
-                this.startTime = null;
-                this.errorsCount = 0;
-                this.demoInterval = null;
-
-                this.settings = {
-                    sound: true,
-                    vibration: true,
-                    ghost: true
-                };
-
-                this.calibration = {
-                    scale: 1.0,
-                    rotation: 0
-                };
-
-                this.stats = {
-                    highScore: 0,
-                    totalSessions: 0
-                };
-
-                this.isCameraActive = false;
-                this.stream = null;
-
-                this.init();
-            }
-
-            init() {
-                this.loadLocalStorage();
-                this.setupCanvas();
-                this.setupPointerListeners();
-                this.renderKnotList();
-                this.updateDashboardUI();
-            }
-
-            loadLocalStorage() {
-                try {
-                    const savedStats = localStorage.getItem('ar_knot_trainer_stats');
-                    if (savedStats) this.stats = JSON.parse(savedStats);
-
-                    const savedSettings = localStorage.getItem('ar_knot_trainer_settings');
-                    if (savedSettings) this.settings = JSON.parse(savedSettings);
-                } catch(e) {}
-            }
-
-            saveStats() {
-                try {
-                    localStorage.setItem('ar_knot_trainer_stats', JSON.stringify(this.stats));
-                } catch(e) {}
-            }
-
-            saveSettings() {
-                this.settings.sound = document.getElementById('setting-sound').checked;
-                this.settings.vibration = document.getElementById('setting-vibration').checked;
-                this.settings.ghost = document.getElementById('setting-ghost').checked;
-                try {
-                    localStorage.setItem('ar_knot_trainer_settings', JSON.stringify(this.settings));
-                } catch(e) {}
-            }
-
-            setupCanvas() {
-                this.canvas = document.getElementById('ar-canvas');
-                this.renderer = new AROverlayRenderer(this.canvas);
-                window.addEventListener('resize', () => {
-                    this.renderer.resize();
-                });
-                this.renderer.resize();
-
-                // Animation loop
-                const animate = () => {
-                    if (this.currentStep) {
-                        this.renderer.userStroke = this.userStroke;
-                        this.renderer.render(
-                            this.currentStep,
-                            this.calibration,
-                            this.settings.ghost
-                        );
-                    }
-                    requestAnimationFrame(animate);
-                };
-                requestAnimationFrame(animate);
-            }
-
-            get currentStep() {
-                return this.currentKnot ? this.currentKnot.steps[this.currentStepIdx] : null;
-            }
-
-            setupPointerListeners() {
-                const getNormalizedPos = (e) => {
-                    const rect = this.canvas.getBoundingClientRect();
-                    return {
-                        x: (e.clientX - rect.left) / rect.width,
-                        y: (e.clientY - rect.top) / rect.height
-                    };
-                };
-
-                this.canvas.addEventListener('pointerdown', (e) => {
-                    if (!this.currentStep) return;
-                    this.isDrawing = true;
-                    this.userStroke = [getNormalizedPos(e)];
-                });
-
-                this.canvas.addEventListener('pointermove', (e) => {
-                    if (!this.isDrawing) return;
-                    this.userStroke.push(getNormalizedPos(e));
-                });
-
-                this.canvas.addEventListener('pointerup', () => {
-                    if (!this.isDrawing) return;
-                    this.isDrawing = false;
-                    this.validateCurrentStroke();
-                });
-
-                this.canvas.addEventListener('pointercancel', () => {
-                    this.isDrawing = false;
-                });
-            }
-
-            validateCurrentStroke() {
-                if (!this.currentStep || this.userStroke.length < 2) return;
-
-                const result = PathValidator.validateStroke(
-                    this.userStroke,
-                    this.currentStep,
-                    this.canvas.width,
-                    this.canvas.height
-                );
-
-                if (result.isValid) {
-                    soundSynth.playSuccess();
-                    soundSynth.vibrate([40, 30, 40]);
-                    this.showToast('✓ ขั้นตอนถูกต้อง!', 'arSuccess');
-                    
-                    setTimeout(() => {
-                        this.nextStep();
-                    }, 600);
-                } else {
-                    this.errorsCount++;
-                    soundSynth.playError();
-                    soundSynth.vibrate([150]);
-                    
-                    let msg = 'ลองใหม่อีกครั้ง';
-                    if (result.reason === 'WRONG_START') msg = 'กรุณาเริ่มลากจากจุด START';
-                    this.showToast(msg, 'arError');
-                    
-                    // Reset user stroke on error
-                    setTimeout(() => {
-                        this.userStroke = [];
-                    }, 400);
-                }
-            }
-
-            showToast(message, type) {
-                const toast = document.getElementById('ar-status-toast');
-                toast.innerText = message;
-                toast.className = `text-center py-2 px-5 rounded-full text-xs font-bold transition-all mx-auto w-max shadow-lg block text-slate-950 ${type === 'arSuccess' ? 'bg-arSuccess' : 'bg-arError text-white'}`;
-                
-                setTimeout(() => {
-                    toast.className = 'hidden';
-                }, 1500);
-            }
-
-            /* ROUTING AND VIEWS CONTROLLER */
-            switchView(viewId) {
-                const views = ['view-dashboard', 'view-knots', 'view-ar', 'view-calibration', 'view-results', 'view-settings'];
-                views.forEach(v => {
-                    document.getElementById(v).classList.add('hidden');
-                });
-                document.getElementById(viewId).classList.remove('hidden');
-            }
-
-            showDashboard() {
-                this.stopCamera();
-                this.updateDashboardUI();
-                this.switchView('view-dashboard');
-            }
-
-            showKnotSelector() {
-                this.switchView('view-knots');
-            }
-
-            showSettings() {
-                document.getElementById('setting-sound').checked = this.settings.sound;
-                document.getElementById('setting-vibration').checked = this.settings.vibration;
-                document.getElementById('setting-ghost').checked = this.settings.ghost;
-                this.switchView('view-settings');
-            }
-
-            closeSettings() {
-                this.saveSettings();
-                this.showDashboard();
-            }
-
-            showSafetyModal() {
-                document.getElementById('modal-safety').classList.remove('hidden');
-            }
-
-            hideSafetyModal() {
-                document.getElementById('modal-safety').classList.add('hidden');
-            }
-
-            renderKnotList() {
-                const listEl = document.getElementById('knot-list');
-                listEl.innerHTML = KNOT_DATABASE.map(k => `
-                    <div onclick="app.selectKnot('${k.id}')" class="glass-panel p-4 rounded-2xl flex items-center justify-between cursor-pointer hover:border-arPrimary transition ${k.id === this.currentKnot.id ? 'border-2 border-arPrimary' : ''}">
-                        <div>
-                            <div class="flex items-center space-x-2">
-                                <h3 class="font-bold text-white">${k.name}</h3>
-                                <span class="text-xs text-arWarning font-mono">${'★'.repeat(k.difficulty)}</span>
-                            </div>
-                            <p class="text-xs text-slate-400 mt-1 line-clamp-1">${k.description}</p>
-                        </div>
-                        <i class="fa-solid fa-chevron-right text-slate-400"></i>
+    </section>
+
+    <section id="view-editor" class="view-section bg-gray-900">
+        <!-- Top Nav -->
+        <header class="p-4 bg-darkCard border-b border-gray-800 flex justify-between items-center z-20 relative">
+            <button onclick="App.switchView('dashboard')" class="text-gray-400 p-2"><i class="ph ph-arrow-left text-xl"></i></button>
+            <h2 class="font-semibold">ปรับแต่งเส้นทาง (Editor)</h2>
+            <button onclick="App.saveTemplate()" class="text-primary font-medium px-4 py-2 bg-primary/10 rounded-lg">บันทึก</button>
+        </header>
+
+        <!-- Main Editor Area -->
+        <div class="flex-grow relative bg-black overflow-hidden flex justify-center items-center" id="editor-workspace">
+            <!-- Background Image (Captured Frame) -->
+            <img id="editor-bg-img" class="absolute w-full h-full object-contain opacity-50 pointer-events-none" src="" alt="Background frame">
+            
+            <!-- Interactive SVG Overlay -->
+            <svg id="editor-svg" class="absolute w-full h-full object-contain ar-interactive" style="touch-action: none;"></svg>
+        </div>
+
+        <!-- Bottom Tools -->
+        <div class="glass-panel p-4 z-20 relative">
+            <div class="mb-4">
+                <input type="text" id="edit-knot-name" placeholder="ตั้งชื่อเงื่อน (เช่น เงื่อนพิรอด)" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary">
+            </div>
+            
+            <div class="flex justify-between items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                <button onclick="Editor.setMode('select')" id="tool-select" class="tool-btn active flex-shrink-0 bg-primary/20 text-primary px-4 py-2 rounded-lg flex flex-col items-center gap-1">
+                    <i class="ph ph-cursor text-xl"></i>
+                    <span class="text-xs">ลากจุด</span>
+                </button>
+                <button onclick="Editor.setMode('add')" id="tool-add" class="tool-btn flex-shrink-0 bg-gray-800 text-gray-400 px-4 py-2 rounded-lg flex flex-col items-center gap-1">
+                    <i class="ph ph-plus-circle text-xl"></i>
+                    <span class="text-xs">เพิ่ม</span>
+                </button>
+                <button onclick="Editor.setMode('delete')" id="tool-delete" class="tool-btn flex-shrink-0 bg-gray-800 text-gray-400 px-4 py-2 rounded-lg flex flex-col items-center gap-1">
+                    <i class="ph ph-eraser text-xl"></i>
+                    <span class="text-xs">ลบ</span>
+                </button>
+                <button onclick="Editor.smoothPath()" class="flex-shrink-0 bg-gray-800 text-gray-400 px-4 py-2 rounded-lg flex flex-col items-center gap-1">
+                    <i class="ph ph-magic-wand text-xl"></i>
+                    <span class="text-xs">สมูทเส้น</span>
+                </button>
+            </div>
+            
+            <!-- Selected Point Context Menu -->
+            <div id="editor-context-menu" class="hidden mt-4 pt-4 border-t border-gray-700 flex justify-between">
+                <select id="point-type-select" onchange="Editor.updatePointType(this.value)" class="bg-gray-800 border-none rounded-lg px-3 py-2 text-sm text-white">
+                    <option value="NORMAL">จุดปกติ</option>
+                    <option value="START">START</option>
+                    <option value="END">END</option>
+                    <option value="CROSS">CROSS</option>
+                    <option value="KEY">KEY POINT</option>
+                </select>
+                <div class="text-xs text-gray-500 self-center">Confidence: <span id="point-conf-display">--</span></div>
+            </div>
+        </div>
+    </section>
+
+    <section id="view-library" class="view-section">
+        <header class="p-4 bg-darkBg sticky top-0 z-10">
+            <div class="flex items-center gap-4 mb-4">
+                <button onclick="App.switchView('dashboard')" class="p-2"><i class="ph ph-arrow-left text-xl"></i></button>
+                <h1 class="text-xl font-bold flex-grow">คลังเงื่อนเชือก</h1>
+            </div>
+            <!-- Search & Filter -->
+            <div class="flex gap-2">
+                <div class="relative flex-grow">
+                    <i class="ph ph-magnifying-glass absolute left-3 top-3 text-gray-400"></i>
+                    <input type="text" id="lib-search" placeholder="ค้นหา..." class="w-full bg-darkCard border border-gray-700 rounded-xl pl-10 pr-4 py-2 focus:outline-none focus:border-primary text-sm">
+                </div>
+                <button class="bg-darkCard border border-gray-700 px-4 rounded-xl"><i class="ph ph-funnel"></i></button>
+            </div>
+        </header>
+
+        <main class="flex-grow p-4 overflow-y-auto" id="library-grid">
+            <!-- Populated by JS -->
+            <div class="text-center text-gray-500 mt-10">กำลังโหลด...</div>
+        </main>
+        
+        <!-- Add FAB -->
+        <button onclick="App.startRecording()" class="absolute bottom-6 right-6 w-14 h-14 bg-primary text-white rounded-full shadow-lg flex items-center justify-center hover:bg-indigo-500 transition">
+            <i class="ph ph-plus text-2xl"></i>
+        </button>
+    </section>
+
+    <section id="view-practice" class="view-section">
+        <div class="ar-container">
+            <video id="practice-video" class="ar-video" autoplay playsinline muted></video>
+            
+            <!-- Target Path Overlay (SVG) -->
+            <svg id="practice-target-svg" class="ar-overlay"></svg>
+            
+            <!-- User Path Overlay (Canvas) -->
+            <canvas id="practice-user-overlay" class="ar-overlay"></canvas>
+
+            <!-- Top HUD -->
+            <div class="absolute top-0 left-0 w-full p-4 flex justify-between items-start z-20 glass-panel rounded-b-3xl">
+                <button onclick="App.switchView('library')" class="w-10 h-10 rounded-full bg-black/30 flex items-center justify-center text-white">
+                    <i class="ph ph-x text-xl"></i>
+                </button>
+                <div class="text-center flex-grow">
+                    <h3 class="font-bold text-white text-shadow" id="practice-knot-name">กำลังฝึก: -</h3>
+                    <div class="text-xs text-secondary mt-1" id="practice-step-text">Step 1/1</div>
+                </div>
+                <button onclick="Camera.switchCamera()" class="w-10 h-10 rounded-full bg-black/30 flex items-center justify-center text-white">
+                    <i class="ph ph-camera-rotate text-xl"></i>
+                </button>
+            </div>
+
+            <!-- Feedback UI -->
+            <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none transition-opacity duration-300 opacity-0" id="practice-feedback">
+                <div class="bg-black/70 backdrop-blur text-white px-6 py-3 rounded-full text-lg font-bold flex items-center gap-2">
+                    <i class="ph ph-warning-circle text-red-500"></i>
+                    <span id="practice-feedback-text">ผิดทิศทาง!</span>
+                </div>
+            </div>
+
+            <!-- Bottom Controls -->
+            <div class="absolute bottom-0 left-0 w-full p-6 z-20 glass-panel">
+                <div class="mb-4">
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-300">ความคืบหน้า</span>
+                        <span class="text-secondary font-bold" id="practice-score">0%</span>
                     </div>
-                `).join('');
-            }
+                    <div class="h-2 w-full bg-gray-700 rounded-full overflow-hidden">
+                        <div class="h-full bg-secondary transition-all duration-300" style="width: 0%" id="practice-progress-bar"></div>
+                    </div>
+                </div>
+                <div class="flex gap-4">
+                    <button class="flex-1 bg-gray-800 py-3 rounded-xl text-sm" onclick="Practice.prevStep()">ก่อนหน้า</button>
+                    <button class="flex-1 bg-primary py-3 rounded-xl text-sm font-bold shadow-lg shadow-primary/30" onclick="Practice.nextStep()">ถัดไป</button>
+                </div>
+            </div>
+        </div>
+    </section>
 
-            selectKnot(knotId) {
-                const found = KNOT_DATABASE.find(k => k.id === knotId);
-                if (found) {
-                    this.currentKnot = found;
-                    this.renderKnotList();
-                    this.updateDashboardUI();
-                    this.showDashboard();
+    <script>
+        // --- UTILITIES ---
+        const Utils = {
+            generateId: () => Math.random().toString(36).substring(2, 9),
+            
+            // Map normalized coordinates (0-1) to actual pixel dimensions
+            mapToPixels: (normX, normY, width, height) => ({
+                x: normX * width,
+                y: normY * height
+            }),
+            
+            // Map pixel coordinates to normalized (0-1)
+            mapToNormalized: (pxX, pxY, width, height) => ({
+                x: Math.max(0, Math.min(1, pxX / width)),
+                y: Math.max(0, Math.min(1, pxY / height))
+            }),
+
+            distance: (p1, p2) => Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2)),
+
+            // Ramer-Douglas-Peucker algorithm for path simplification
+            simplifyPath: (points, epsilon) => {
+                if (points.length <= 2) return points;
+
+                let dmax = 0;
+                let index = 0;
+                const end = points.length - 1;
+
+                for (let i = 1; i < end; i++) {
+                    const d = Utils.perpendicularDistance(points[i], points[0], points[end]);
+                    if (d > dmax) {
+                        index = i;
+                        dmax = d;
+                    }
+                }
+
+                if (dmax > epsilon) {
+                    const recResults1 = Utils.simplifyPath(points.slice(0, index + 1), epsilon);
+                    const recResults2 = Utils.simplifyPath(points.slice(index), epsilon);
+                    return recResults1.slice(0, recResults1.length - 1).concat(recResults2);
+                } else {
+                    return [points[0], points[end]];
+                }
+            },
+
+            perpendicularDistance: (point, lineStart, lineEnd) => {
+                let dx = lineEnd.x - lineStart.x;
+                let dy = lineEnd.y - lineStart.y;
+                
+                const mag = Math.sqrt(dx*dx + dy*dy);
+                if(mag > 0){ dx /= mag; dy /= mag; }
+                
+                const pvx = point.x - lineStart.x;
+                const pvy = point.y - lineStart.y;
+                
+                const pvdot = dx * pvx + dy * pvy;
+                const dsx = pvdot * dx;
+                const dsy = pvdot * dy;
+                
+                const ax = pvx - dsx;
+                const ay = pvy - dsy;
+                
+                return Math.sqrt(ax*ax + ay*ay);
+            }
+        };
+
+        // --- INDEXED DB WRAPPER ---
+        const DB = {
+            dbName: 'ARRopePathDB',
+            storeName: 'knots',
+            db: null,
+
+            init: async () => {
+                return new Promise((resolve, reject) => {
+                    const request = indexedDB.open(DB.dbName, 1);
+                    
+                    request.onupgradeneeded = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains(DB.storeName)) {
+                            db.createObjectStore(DB.storeName, { keyPath: 'id' });
+                        }
+                    };
+                    
+                    request.onsuccess = async (e) => {
+                        DB.db = e.target.result;
+                        await DB.checkAndInjectSampleData();
+                        resolve();
+                    };
+                    
+                    request.onerror = (e) => reject(e.target.error);
+                });
+            },
+
+            getAll: async () => {
+                return new Promise((resolve) => {
+                    const tx = DB.db.transaction(DB.storeName, 'readonly');
+                    const store = tx.objectStore(DB.storeName);
+                    const request = store.getAll();
+                    request.onsuccess = () => resolve(request.result);
+                });
+            },
+
+            save: async (knot) => {
+                return new Promise((resolve) => {
+                    knot.updatedAt = new Date().toISOString();
+                    const tx = DB.db.transaction(DB.storeName, 'readwrite');
+                    const store = tx.objectStore(DB.storeName);
+                    store.put(knot);
+                    tx.oncomplete = () => resolve(knot);
+                });
+            },
+
+            delete: async (id) => {
+                return new Promise((resolve) => {
+                    const tx = DB.db.transaction(DB.storeName, 'readwrite');
+                    const store = tx.objectStore(DB.storeName);
+                    store.delete(id);
+                    tx.oncomplete = () => resolve();
+                });
+            },
+
+            checkAndInjectSampleData: async () => {
+                const existing = await DB.getAll();
+                if (existing.length === 0) {
+                    console.log("Injecting sample knots...");
+                    const samples = [
+                        {
+                            id: 'sample-1',
+                            name: 'เงื่อนขัดสมาธิ (Square Knot)',
+                            desc: 'เงื่อนพื้นฐานสำหรับต่อเชือกขนาดเท่ากัน',
+                            difficulty: 'Beginner',
+                            steps: 2,
+                            createdAt: new Date().toISOString(),
+                            pathData: [
+                                {x: 0.2, y: 0.5, type: 'START', conf: 1.0},
+                                {x: 0.4, y: 0.3, type: 'NORMAL', conf: 0.9},
+                                {x: 0.6, y: 0.3, type: 'CROSS', conf: 0.9},
+                                {x: 0.8, y: 0.5, type: 'NORMAL', conf: 0.9},
+                                {x: 0.6, y: 0.7, type: 'CROSS', conf: 0.9},
+                                {x: 0.4, y: 0.7, type: 'NORMAL', conf: 0.9},
+                                {x: 0.2, y: 0.5, type: 'END', conf: 1.0}
+                            ],
+                            thumbnail: 'https://placehold.co/400x300/1e293b/4f46e5?text=Square+Knot'
+                        },
+                        {
+                            id: 'sample-2',
+                            name: 'เงื่อนเลขแปด (Figure-Eight)',
+                            desc: 'เงื่อนห้ามรูดที่แข็งแรงและแก้ง่าย',
+                            difficulty: 'Intermediate',
+                            steps: 3,
+                            createdAt: new Date().toISOString(),
+                            pathData: [
+                                {x: 0.5, y: 0.1, type: 'START', conf: 1.0},
+                                {x: 0.3, y: 0.4, type: 'NORMAL', conf: 0.9},
+                                {x: 0.7, y: 0.6, type: 'CROSS', conf: 0.9},
+                                {x: 0.5, y: 0.9, type: 'LOOP', conf: 0.9},
+                                {x: 0.3, y: 0.6, type: 'NORMAL', conf: 0.9},
+                                {x: 0.5, y: 0.4, type: 'CROSS', conf: 0.9},
+                                {x: 0.7, y: 0.1, type: 'END', conf: 1.0}
+                            ],
+                            thumbnail: 'https://placehold.co/400x300/1e293b/10b981?text=Figure+8'
+                        }
+                    ];
+                    for (let s of samples) await DB.save(s);
                 }
             }
+        };
 
-            updateDashboardUI() {
-                document.getElementById('dash-high-score').innerText = this.stats.highScore;
-                document.getElementById('dash-total-sessions').innerText = this.stats.totalSessions;
+        // --- STREAMING_CHUNK:Camera & Detection Module ---
+        const Camera = {
+            stream: null,
+            videoEl: null,
+            facingMode: 'environment', // Start with rear camera
+            active: false,
+            
+            init: (videoElementId) => {
+                Camera.videoEl = document.getElementById(videoElementId);
+            },
+
+            start: async () => {
+                if (Camera.stream) Camera.stop();
                 
-                document.getElementById('current-knot-name').innerText = this.currentKnot.name;
-                document.getElementById('current-knot-desc').innerText = this.currentKnot.description;
-                document.getElementById('current-knot-badge').innerText = `ระดับ ${'★'.repeat(this.currentKnot.difficulty)}${'☆'.repeat(5 - this.currentKnot.difficulty)}`;
-                document.getElementById('current-knot-steps-count').innerText = `${this.currentKnot.steps.length} ขั้นตอนการฝึกลากเส้นทาง`;
-            }
-
-            async startTraining() {
-                this.currentStepIdx = 0;
-                this.userStroke = [];
-                this.errorsCount = 0;
-                this.startTime = Date.now();
-
-                this.switchView('view-ar');
-                this.updateARHUD();
-                
-                await this.initCamera();
-            }
-
-            async initCamera() {
-                const video = document.getElementById('ar-video');
-                const btnText = document.getElementById('camera-btn-text');
-
                 try {
-                    // Force strictly rear facing camera
                     const constraints = {
                         video: {
-                            facingMode: { ideal: "environment" },
+                            facingMode: Camera.facingMode,
                             width: { ideal: 1280 },
                             height: { ideal: 720 }
                         },
                         audio: false
                     };
-
-                    this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-                    video.srcObject = this.stream;
-                    video.classList.remove('hidden');
-                    this.isCameraActive = true;
-                    btnText.innerText = "กล้องทำงานอยู่";
-                } catch (err) {
-                    console.warn("Camera access denied or unavailable. Fallback to Desk Simulation mode.");
-                    video.classList.add('hidden');
-                    this.isCameraActive = false;
-                    btnText.innerText = "โหมดตั้งโต๊ะ";
-                    this.showToast('เข้าสู่โหมดจำลองตั้งโต๊ะ', 'arPrimary');
-                }
-            }
-
-            stopCamera() {
-                if (this.stream) {
-                    this.stream.getTracks().forEach(track => track.stop());
-                    this.stream = null;
-                }
-                const video = document.getElementById('ar-video');
-                video.classList.add('hidden');
-                this.isCameraActive = false;
-            }
-
-            toggleCameraFallback() {
-                if (this.isCameraActive) {
-                    this.stopCamera();
-                    document.getElementById('camera-btn-text').innerText = "โหมดตั้งโต๊ะ";
-                } else {
-                    this.initCamera();
-                }
-            }
-
-            updateARHUD() {
-                document.getElementById('ar-knot-title').innerText = this.currentKnot.name;
-                document.getElementById('ar-step-counter').innerText = `${this.currentStepIdx + 1}/${this.currentKnot.steps.length}`;
-                
-                const step = this.currentStep;
-                if (step) {
-                    document.getElementById('instruction-text').innerText = step.instruction;
-                    document.getElementById('instruction-sub').innerHTML = `<i class="fa-solid fa-hand-pointer text-[11px] animate-bounce"></i> <span>${step.subInstruction}</span>`;
                     
-                    // Voice prompt
-                    soundSynth.speak(step.instruction);
+                    Camera.stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    Camera.videoEl.srcObject = Camera.stream;
+                    Camera.active = true;
+                    
+                    // Return promise that resolves when video is playing
+                    return new Promise((resolve) => {
+                        Camera.videoEl.onloadedmetadata = () => {
+                            Camera.videoEl.play();
+                            resolve();
+                        };
+                    });
+                } catch (err) {
+                    console.error("Camera access error:", err);
+                    alert("ไม่สามารถเข้าถึงกล้องได้ กรุณาให้สิทธิ์การใช้งานกล้อง");
+                    return Promise.reject(err);
                 }
-            }
+            },
 
-            resetCurrentStep() {
-                this.userStroke = [];
-                this.showToast('เริ่มขั้นตอนใหม่', 'arPrimary');
-            }
-
-            nextStep() {
-                this.userStroke = [];
-                if (this.currentStepIdx < this.currentKnot.steps.length - 1) {
-                    this.currentStepIdx++;
-                    this.updateARHUD();
-                } else {
-                    this.completeTraining();
+            stop: () => {
+                if (Camera.stream) {
+                    Camera.stream.getTracks().forEach(track => track.stop());
+                    Camera.stream = null;
                 }
-            }
+                Camera.active = false;
+            },
 
-            toggleHelpGhost() {
-                this.settings.ghost = !this.settings.ghost;
-                const btn = document.getElementById('btn-ghost-toggle');
-                if (this.settings.ghost) {
-                    btn.className = "px-2.5 py-1.5 rounded-xl bg-arPrimary/20 border border-arPrimary/40 text-arPrimary text-xs font-semibold flex items-center space-x-1";
-                } else {
-                    btn.className = "px-2.5 py-1.5 rounded-xl bg-slate-800 border border-white/10 text-slate-400 text-xs font-semibold flex items-center space-x-1";
+            switchCamera: async () => {
+                Camera.facingMode = Camera.facingMode === 'user' ? 'environment' : 'user';
+                await Camera.start();
+            }
+        };
+
+        const Detector = {
+            isRecording: false,
+            pathPoints: [],
+            lastProcessTime: 0,
+            canvas: null,
+            ctx: null,
+            overlayCanvas: null,
+            overlayCtx: null,
+            fpsEl: null,
+            frames: 0,
+            lastFpsTime: 0,
+
+            // Config for heuristic detection (Tracking Bright Colors / Red)
+            downscaleRatio: 0.25, // Process at 25% resolution for speed
+            minDistNorm: 0.02,    // Minimum normalized distance to record a new point
+
+            init: () => {
+                Detector.canvas = document.getElementById('cv-canvas');
+                Detector.ctx = Detector.canvas.getContext('2d', { willReadFrequently: true });
+                Detector.overlayCanvas = document.getElementById('recorder-overlay');
+                Detector.overlayCtx = Detector.overlayCanvas.getContext('2d');
+                Detector.fpsEl = document.getElementById('recorder-fps');
+            },
+
+            start: () => {
+                Detector.isRecording = true;
+                Detector.pathPoints = [];
+                Detector.frames = 0;
+                Detector.lastFpsTime = performance.now();
+                Detector.resizeCanvases();
+                document.getElementById('recording-indicator').classList.remove('hidden');
+                document.getElementById('btn-record-inner').classList.remove('bg-red-500');
+                document.getElementById('btn-record-inner').classList.add('bg-gray-400', 'scale-50', 'rounded-md');
+                Detector.loop();
+            },
+
+            stop: () => {
+                Detector.isRecording = false;
+                document.getElementById('recording-indicator').classList.add('hidden');
+                document.getElementById('btn-record-inner').classList.add('bg-red-500');
+                document.getElementById('btn-record-inner').classList.remove('bg-gray-400', 'scale-50', 'rounded-md');
+                
+                // Clear overlay
+                Detector.overlayCtx.clearRect(0, 0, Detector.overlayCanvas.width, Detector.overlayCanvas.height);
+                
+                return Detector.pathPoints; // Return raw points
+            },
+
+            resizeCanvases: () => {
+                const rect = Camera.videoEl.getBoundingClientRect();
+                
+                // Visible overlay
+                Detector.overlayCanvas.width = rect.width;
+                Detector.overlayCanvas.height = rect.height;
+                
+                // Processing canvas (downscaled)
+                Detector.canvas.width = rect.width * Detector.downscaleRatio;
+                Detector.canvas.height = rect.height * Detector.downscaleRatio;
+            },
+
+            loop: () => {
+                if (!Detector.isRecording) return;
+                
+                const now = performance.now();
+                Detector.frames++;
+                if (now - Detector.lastFpsTime >= 1000) {
+                    Detector.fpsEl.innerText = Detector.frames;
+                    Detector.frames = 0;
+                    Detector.lastFpsTime = now;
                 }
-            }
 
-            openCalibration() {
-                document.getElementById('view-calibration').classList.remove('hidden');
-            }
+                Detector.processFrame();
+                Detector.drawLivePath();
+                
+                requestAnimationFrame(Detector.loop);
+            },
 
-            updateCalibration() {
-                this.calibration.scale = parseFloat(document.getElementById('calib-scale').value);
-                this.calibration.rotation = parseInt(document.getElementById('calib-rotation').value);
-            }
+            processFrame: () => {
+                if (!Camera.videoEl || Camera.videoEl.videoWidth === 0) return;
 
-            closeCalibration() {
-                document.getElementById('view-calibration').classList.add('hidden');
-            }
+                const cw = Detector.canvas.width;
+                const ch = Detector.canvas.height;
+                
+                // Draw video to hidden canvas
+                Detector.ctx.drawImage(Camera.videoEl, 0, 0, cw, ch);
+                const imageData = Detector.ctx.getImageData(0, 0, cw, ch);
+                const data = imageData.data;
 
-            confirmExitTraining() {
-                if (confirm('คุณต้องการยกเลิกการฝึกจำในครั้งนี้หรือไม่?')) {
-                    this.showDashboard();
+                // Simple heuristic: Find center of mass of brightest pixels (simulating a bright colored rope)
+                let sumX = 0, sumY = 0, count = 0;
+                
+                // Scan pixels (step by 4 for RGBA, step by 8 to skip pixels for speed)
+                for (let i = 0; i < data.length; i += 16) {
+                    const r = data[i];
+                    const g = data[i+1];
+                    const b = data[i+2];
+                    
+                    // Simple threshold: bright red/orange OR just high luminance
+                    // For MVP, tracking bright objects
+                    const luminance = (0.299*r + 0.587*g + 0.114*b);
+                    
+                    if (luminance > 200) { // High brightness threshold
+                        const pixelIndex = i / 4;
+                        const x = pixelIndex % cw;
+                        const y = Math.floor(pixelIndex / cw);
+                        sumX += x;
+                        sumY += y;
+                        count++;
+                    }
                 }
+
+                if (count > 20) { // Need enough pixels to be confident
+                    const avgX = sumX / count;
+                    const avgY = sumY / count;
+                    
+                    const normX = avgX / cw;
+                    const normY = avgY / ch;
+                    
+                    // Flip X if using front camera to match mirrored display
+                    const finalX = Camera.facingMode === 'user' ? 1 - normX : normX;
+
+                    const newPoint = {
+                        x: finalX,
+                        y: normY,
+                        timestamp: Date.now(),
+                        type: 'NORMAL',
+                        conf: Math.min(1.0, count / 500) // pseudo-confidence
+                    };
+
+                    // Add point if it's far enough from the last one
+                    if (Detector.pathPoints.length === 0) {
+                        newPoint.type = 'START';
+                        Detector.pathPoints.push(newPoint);
+                    } else {
+                        const lastPoint = Detector.pathPoints[Detector.pathPoints.length - 1];
+                        if (Utils.distance(lastPoint, newPoint) > Detector.minDistNorm) {
+                            Detector.pathPoints.push(newPoint);
+                            document.getElementById('debug-pts').innerText = Detector.pathPoints.length;
+                        }
+                    }
+                }
+            },
+
+            drawLivePath: () => {
+                const ctx = Detector.overlayCtx;
+                const w = Detector.overlayCanvas.width;
+                const h = Detector.overlayCanvas.height;
+                
+                ctx.clearRect(0, 0, w, h);
+                
+                if (Detector.pathPoints.length < 2) return;
+
+                ctx.beginPath();
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = '#10b981'; // Tailwind Secondary
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                const first = Utils.mapToPixels(Detector.pathPoints[0].x, Detector.pathPoints[0].y, w, h);
+                ctx.moveTo(first.x, first.y);
+
+                for (let i = 1; i < Detector.pathPoints.length; i++) {
+                    const pt = Utils.mapToPixels(Detector.pathPoints[i].x, Detector.pathPoints[i].y, w, h);
+                    ctx.lineTo(pt.x, pt.y);
+                }
+                ctx.stroke();
+                
+                // Draw current head
+                const last = Detector.pathPoints[Detector.pathPoints.length - 1];
+                const head = Utils.mapToPixels(last.x, last.y, w, h);
+                ctx.beginPath();
+                ctx.arc(head.x, head.y, 8, 0, Math.PI * 2);
+                ctx.fillStyle = '#ef4444'; // Red dot for current head
+                ctx.fill();
             }
+        };
 
-            startDemoMode() {
-                this.currentStepIdx = 0;
-                this.userStroke = [];
-                this.switchView('view-ar');
-                this.updateARHUD();
+        // --- STREAMING_CHUNK:Editor Module ---
+        const Editor = {
+            svg: null,
+            bgImg: null,
+            pathData: [],
+            mode: 'select', // select, add, delete
+            selectedNodeIdx: -1,
+            isDragging: false,
+            
+            init: () => {
+                Editor.svg = document.getElementById('editor-svg');
+                Editor.bgImg = document.getElementById('editor-bg-img');
+                
+                Editor.svg.addEventListener('mousedown', Editor.handlePointerDown);
+                Editor.svg.addEventListener('mousemove', Editor.handlePointerMove);
+                Editor.svg.addEventListener('mouseup', Editor.handlePointerUp);
+                
+                // Touch support
+                Editor.svg.addEventListener('touchstart', (e) => { e.preventDefault(); Editor.handlePointerDown(e.touches[0]); }, {passive: false});
+                Editor.svg.addEventListener('touchmove', (e) => { e.preventDefault(); Editor.handlePointerMove(e.touches[0]); }, {passive: false});
+                Editor.svg.addEventListener('touchend', Editor.handlePointerUp);
+            },
 
-                let progress = 0;
-                if (this.demoInterval) clearInterval(this.demoInterval);
+            loadData: (points, imageSrc) => {
+                // Simplify path immediately for easier editing
+                Editor.pathData = Utils.simplifyPath(points, 0.01);
+                
+                if (Editor.pathData.length > 0) {
+                    Editor.pathData[0].type = 'START';
+                    Editor.pathData[Editor.pathData.length - 1].type = 'END';
+                }
+                
+                if (imageSrc) Editor.bgImg.src = imageSrc;
+                Editor.selectedNodeIdx = -1;
+                document.getElementById('editor-context-menu').classList.add('hidden');
+                Editor.render();
+            },
 
-                this.demoInterval = setInterval(() => {
-                    const step = this.currentStep;
-                    if (!step) {
-                        clearInterval(this.demoInterval);
+            setMode: (mode) => {
+                Editor.mode = mode;
+                document.querySelectorAll('.tool-btn').forEach(b => {
+                    b.classList.remove('bg-primary/20', 'text-primary');
+                    b.classList.add('bg-gray-800', 'text-gray-400');
+                });
+                document.getElementById('tool-' + mode).classList.remove('bg-gray-800', 'text-gray-400');
+                document.getElementById('tool-' + mode).classList.add('bg-primary/20', 'text-primary');
+            },
+
+            smoothPath: () => {
+                Editor.pathData = Utils.simplifyPath(Editor.pathData, 0.02);
+                Editor.render();
+            },
+
+            getCoords: (e) => {
+                const rect = Editor.svg.getBoundingClientRect();
+                const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+                const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+                return Utils.mapToNormalized(clientX - rect.left, clientY - rect.top, rect.width, rect.height);
+            },
+
+            handlePointerDown: (e) => {
+                const target = e.target;
+                if (target.tagName === 'circle') {
+                    const idx = parseInt(target.getAttribute('data-idx'));
+                    
+                    if (Editor.mode === 'delete') {
+                        Editor.pathData.splice(idx, 1);
+                        Editor.selectedNodeIdx = -1;
+                        document.getElementById('editor-context-menu').classList.add('hidden');
+                        Editor.render();
                         return;
                     }
 
-                    progress += 0.05;
-                    const curX = step.start.x + (step.end.x - step.start.x) * progress;
-                    const curY = step.start.y + (step.end.y - step.start.y) * progress;
+                    Editor.selectedNodeIdx = idx;
+                    Editor.isDragging = true;
+                    
+                    // Show context menu
+                    const cm = document.getElementById('editor-context-menu');
+                    cm.classList.remove('hidden');
+                    document.getElementById('point-type-select').value = Editor.pathData[idx].type || 'NORMAL';
+                    document.getElementById('point-conf-display').innerText = (Editor.pathData[idx].conf * 100).toFixed(0) + '%';
+                    
+                } else if (Editor.mode === 'add') {
+                    const normCoords = Editor.getCoords(e);
+                    // Append for MVP (advanced logic would insert between nearest segment)
+                    Editor.pathData.push({
+                        x: normCoords.x,
+                        y: normCoords.y,
+                        type: 'NORMAL',
+                        conf: 1.0
+                    });
+                    Editor.render();
+                } else {
+                    Editor.selectedNodeIdx = -1;
+                    document.getElementById('editor-context-menu').classList.add('hidden');
+                }
+            },
 
-                    this.userStroke.push({ x: curX, y: curY });
+            handlePointerMove: (e) => {
+                if (Editor.isDragging && Editor.selectedNodeIdx > -1 && Editor.mode === 'select') {
+                    const normCoords = Editor.getCoords(e);
+                    Editor.pathData[Editor.selectedNodeIdx].x = normCoords.x;
+                    Editor.pathData[Editor.selectedNodeIdx].y = normCoords.y;
+                    Editor.render();
+                }
+            },
 
-                    if (progress >= 1) {
-                        progress = 0;
-                        if (this.currentStepIdx < this.currentKnot.steps.length - 1) {
-                            this.currentStepIdx++;
-                            this.userStroke = [];
-                            this.updateARHUD();
-                        } else {
-                            clearInterval(this.demoInterval);
-                            setTimeout(() => {
-                                alert('สาธิตครบทุกขั้นตอนแล้ว!');
-                                this.showDashboard();
-                            }, 500);
+            handlePointerUp: () => {
+                Editor.isDragging = false;
+            },
+
+            updatePointType: (type) => {
+                if (Editor.selectedNodeIdx > -1) {
+                    Editor.pathData[Editor.selectedNodeIdx].type = type;
+                    Editor.render();
+                }
+            },
+
+            render: () => {
+                const rect = Editor.svg.getBoundingClientRect();
+                const w = rect.width;
+                const h = rect.height;
+                
+                // Clear SVG
+                Editor.svg.innerHTML = '';
+                
+                if (Editor.pathData.length < 2) return;
+
+                // Draw Path Lines
+                let d = `M ${Editor.pathData[0].x * w} ${Editor.pathData[0].y * h}`;
+                for (let i = 1; i < Editor.pathData.length; i++) {
+                    d += ` L ${Editor.pathData[i].x * w} ${Editor.pathData[i].y * h}`;
+                }
+                
+                const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                pathEl.setAttribute('d', d);
+                pathEl.setAttribute('stroke', '#4f46e5'); // Primary
+                pathEl.setAttribute('stroke-width', '4');
+                pathEl.setAttribute('fill', 'none');
+                pathEl.setAttribute('stroke-linejoin', 'round');
+                Editor.svg.appendChild(pathEl);
+
+                // Draw Nodes
+                Editor.pathData.forEach((pt, idx) => {
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', pt.x * w);
+                    circle.setAttribute('cy', pt.y * h);
+                    circle.setAttribute('r', idx === Editor.selectedNodeIdx ? '10' : '8');
+                    circle.setAttribute('data-idx', idx);
+                    circle.classList.add('path-node');
+                    
+                    // Colors based on type
+                    let fill = '#3b82f6'; // normal
+                    if (pt.type === 'START') fill = '#10b981'; // green
+                    else if (pt.type === 'END') fill = '#ef4444'; // red
+                    else if (pt.type === 'CROSS') fill = '#f59e0b'; // orange
+                    else if (pt.type === 'KEY') fill = '#d946ef'; // purple
+                    
+                    if (idx === Editor.selectedNodeIdx) {
+                        circle.setAttribute('stroke', 'white');
+                        circle.setAttribute('stroke-width', '3');
+                    }
+
+                    circle.setAttribute('fill', fill);
+                    Editor.svg.appendChild(circle);
+                });
+            }
+        };
+
+        // --- STREAMING_CHUNK:Practice Mode Module ---
+        const Practice = {
+            activeKnot: null,
+            targetPath: [],
+            currentStep: 0, // In MVP, we treat the whole path as 1 step for simplicity, or divide if marked.
+            svg: null,
+            canvas: null,
+            ctx: null,
+            isTracking: false,
+            
+            init: () => {
+                Practice.svg = document.getElementById('practice-target-svg');
+                Practice.canvas = document.getElementById('practice-user-overlay');
+                Practice.ctx = Practice.canvas.getContext('2d');
+            },
+
+            loadKnot: async (knot) => {
+                Practice.activeKnot = knot;
+                Practice.targetPath = knot.pathData;
+                Practice.currentStep = 0;
+                document.getElementById('practice-knot-name').innerText = knot.name;
+                
+                // Render SVG Target
+                Practice.resizeCanvas();
+                Practice.renderTarget();
+                
+                // Start Camera
+                Camera.init('practice-video');
+                await Camera.start();
+                
+                // Start tracker
+                Practice.isTracking = true;
+                Detector.init(); // Reuse detector setup
+                Detector.canvas = document.createElement('canvas'); // hidden processing
+                Detector.ctx = Detector.canvas.getContext('2d', {willReadFrequently:true});
+                Detector.pathPoints = [];
+                Practice.loop();
+            },
+
+            stop: () => {
+                Practice.isTracking = false;
+                Camera.stop();
+            },
+
+            resizeCanvas: () => {
+                const rect = document.getElementById('practice-video').getBoundingClientRect();
+                Practice.canvas.width = rect.width;
+                Practice.canvas.height = rect.height;
+            },
+
+            renderTarget: () => {
+                if (!Practice.activeKnot) return;
+                const rect = Practice.canvas.getBoundingClientRect();
+                const w = rect.width;
+                const h = rect.height;
+                
+                Practice.svg.innerHTML = '';
+                
+                let d = `M ${Practice.targetPath[0].x * w} ${Practice.targetPath[0].y * h}`;
+                for (let i = 1; i < Practice.targetPath.length; i++) {
+                    d += ` L ${Practice.targetPath[i].x * w} ${Practice.targetPath[i].y * h}`;
+                }
+                
+                const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                pathEl.setAttribute('d', d);
+                pathEl.setAttribute('stroke', 'rgba(255,255,255,0.3)');
+                pathEl.setAttribute('stroke-width', '10');
+                pathEl.setAttribute('stroke-dasharray', '15, 10');
+                pathEl.setAttribute('fill', 'none');
+                Practice.svg.appendChild(pathEl);
+            },
+
+            loop: () => {
+                if (!Practice.isTracking) return;
+                
+                const rect = document.getElementById('practice-video').getBoundingClientRect();
+                Detector.canvas.width = rect.width * 0.25;
+                Detector.canvas.height = rect.height * 0.25;
+                
+                // Process frame to find point
+                if (Camera.videoEl.readyState === Camera.videoEl.HAVE_ENOUGH_DATA) {
+                    Detector.ctx.drawImage(Camera.videoEl, 0, 0, Detector.canvas.width, Detector.canvas.height);
+                    // (Simplified re-use of detection logic inline for practice mode)
+                    const imgData = Detector.ctx.getImageData(0,0,Detector.canvas.width, Detector.canvas.height);
+                    let sumX=0, sumY=0, count=0;
+                    for(let i=0; i<imgData.data.length; i+=16){
+                        if((0.299*imgData.data[i] + 0.587*imgData.data[i+1] + 0.114*imgData.data[i+2]) > 200){
+                            sumX += (i/4)%Detector.canvas.width; sumY += Math.floor((i/4)/Detector.canvas.width); count++;
                         }
                     }
-                }, 80);
-            }
-
-            completeTraining() {
-                this.stopCamera();
-                soundSynth.playComplete();
-
-                const timeSec = ((Date.now() - this.startTime) / 1000).toFixed(1);
-                
-                // Calculate Score (0 - 100)
-                // Accuracy 40%, Errors penalty, Speed 20%, Completion 40%
-                let errorPenalty = this.errorsCount * 8;
-                let accuracyScore = Math.max(0, 100 - errorPenalty);
-                let finalScore = Math.round((accuracyScore * 0.7) + 30);
-
-                // Update LocalStorage stats
-                this.stats.totalSessions++;
-                if (finalScore > this.stats.highScore) {
-                    this.stats.highScore = finalScore;
+                    if(count > 20) {
+                        const px = sumX/count/Detector.canvas.width;
+                        const py = sumY/count/Detector.canvas.height;
+                        const finalX = Camera.facingMode === 'user' ? 1 - px : px;
+                        
+                        Practice.updateUserTracking({x: finalX, y: py});
+                    }
                 }
-                this.saveStats();
+                
+                requestAnimationFrame(Practice.loop);
+            },
 
-                // Grade Title
-                let grade = "EXCELLENT";
-                if (finalScore < 90 && finalScore >= 75) grade = "GOOD";
-                else if (finalScore < 75 && finalScore >= 60) grade = "PRACTICE MORE";
-                else if (finalScore < 60) grade = "TRY AGAIN";
+            updateUserTracking: (pt) => {
+                // Add to user path
+                Detector.pathPoints.push(pt);
+                if(Detector.pathPoints.length > 50) Detector.pathPoints.shift(); // Keep tail
+                
+                // Draw trailing path
+                const ctx = Practice.ctx;
+                const w = Practice.canvas.width;
+                const h = Practice.canvas.height;
+                ctx.clearRect(0,0,w,h);
+                
+                ctx.beginPath();
+                ctx.lineWidth = 6;
+                ctx.strokeStyle = '#10b981';
+                ctx.lineCap = 'round';
+                const first = Utils.mapToPixels(Detector.pathPoints[0].x, Detector.pathPoints[0].y, w, h);
+                ctx.moveTo(first.x, first.y);
+                for(let i=1; i<Detector.pathPoints.length; i++){
+                    const p = Utils.mapToPixels(Detector.pathPoints[i].x, Detector.pathPoints[i].y, w, h);
+                    ctx.lineTo(p.x, p.y);
+                }
+                ctx.stroke();
 
-                document.getElementById('result-grade-tag').innerText = grade;
-                document.getElementById('result-total-score').innerText = finalScore;
-                document.getElementById('result-accuracy').innerText = `${accuracyScore}%`;
-                document.getElementById('result-direction').innerText = `100%`;
-                document.getElementById('result-time').innerText = `${timeSec} วินาที`;
-                document.getElementById('result-errors').innerText = `${this.errorsCount} ครั้ง`;
-                document.getElementById('result-knot-name').innerText = this.currentKnot.name;
+                // Calculate naive progress based on closest point in target path to current head
+                if (Practice.targetPath.length > 0) {
+                    let minD = Infinity;
+                    let closestIdx = 0;
+                    for(let i=0; i<Practice.targetPath.length; i++){
+                        const d = Utils.distance(pt, Practice.targetPath[i]);
+                        if(d < minD){ minD = d; closestIdx = i; }
+                    }
+                    
+                    // If way off track
+                    const fb = document.getElementById('practice-feedback');
+                    if (minD > 0.15) {
+                        fb.classList.remove('opacity-0');
+                        fb.querySelector('span').innerText = 'ห่างจากเส้นทาง!';
+                        fb.querySelector('i').className = 'ph ph-warning-circle text-red-500';
+                    } else {
+                        fb.classList.add('opacity-0');
+                    }
 
-                this.switchView('view-results');
+                    const progress = Math.min(100, Math.max(0, (closestIdx / (Practice.targetPath.length-1)) * 100));
+                    document.getElementById('practice-progress-bar').style.width = `${progress}%`;
+                    document.getElementById('practice-score').innerText = `${Math.round(progress)}%`;
+                }
             }
-        }
+        };
 
-        // Initialize App instance on load
-        let app;
+        // --- STREAMING_CHUNK:Main Application Logic ---
+        const App = {
+            views: ['dashboard', 'recorder', 'editor', 'library', 'practice'],
+            
+            init: async () => {
+                await DB.init();
+                Editor.init();
+                Practice.init();
+                App.updateDashboardStats();
+                
+                // Handle resize for editor
+                window.addEventListener('resize', () => {
+                    if(!document.getElementById('view-editor').classList.contains('hidden')) {
+                        Editor.render();
+                    }
+                });
+            },
+
+            switchView: (viewId) => {
+                App.views.forEach(v => {
+                    document.getElementById(`view-${v}`).classList.remove('active');
+                });
+                document.getElementById(`view-${viewId}`).classList.add('active');
+                
+                if (viewId === 'library') App.renderLibrary();
+                if (viewId === 'dashboard') App.updateDashboardStats();
+                
+                // Cleanup camera if leaving relevant views
+                if (viewId !== 'recorder' && viewId !== 'practice') {
+                    Camera.stop();
+                    if(Detector.isRecording) Detector.stop();
+                    Practice.stop();
+                }
+            },
+
+            // --- Dashboard ---
+            updateDashboardStats: async () => {
+                const knots = await DB.getAll();
+                document.getElementById('stat-total-knots').innerText = knots.length;
+                
+                const list = document.getElementById('recent-knots-list');
+                list.innerHTML = '';
+                knots.slice(-3).reverse().forEach(knot => {
+                    list.innerHTML += `
+                        <div class="bg-darkCard p-3 rounded-xl border border-gray-800 flex items-center gap-4 cursor-pointer hover:bg-gray-800 transition" onclick="App.openPractice('${knot.id}')">
+                            <div class="w-12 h-12 bg-gray-700 rounded-lg flex-shrink-0 flex items-center justify-center overflow-hidden">
+                                <img src="${knot.thumbnail || 'https://placehold.co/100/1e293b/fff?text=Knot'}" class="w-full h-full object-cover">
+                            </div>
+                            <div class="flex-grow">
+                                <h3 class="font-medium text-sm">${knot.name}</h3>
+                                <p class="text-xs text-gray-400">${knot.difficulty} • ${knot.steps} ขั้นตอน</p>
+                            </div>
+                            <i class="ph ph-caret-right text-gray-500"></i>
+                        </div>
+                    `;
+                });
+            },
+
+            // --- Recorder ---
+            startRecording: async () => {
+                App.switchView('recorder');
+                Camera.init('recorder-video');
+                Detector.init();
+                await Camera.start();
+                // Show grid
+                document.getElementById('recorder-grid').classList.remove('hidden');
+                document.getElementById('recorder-crosshair').classList.remove('hidden');
+                document.getElementById('recorder-debug').classList.remove('hidden');
+            },
+
+            toggleRecording: () => {
+                if (Detector.isRecording) {
+                    const rawPoints = Detector.stop();
+                    
+                    // Capture a snapshot for the editor background
+                    const tmpCanvas = document.createElement('canvas');
+                    tmpCanvas.width = Camera.videoEl.videoWidth;
+                    tmpCanvas.height = Camera.videoEl.videoHeight;
+                    tmpCanvas.getContext('2d').drawImage(Camera.videoEl, 0, 0);
+                    const bgSrc = tmpCanvas.toDataURL('image/jpeg', 0.5);
+                    
+                    Camera.stop();
+                    
+                    if (rawPoints.length < 2) {
+                        alert("บันทึกเส้นทางไม่เพียงพอ กรุณาลองใหม่");
+                        App.switchView('dashboard');
+                        return;
+                    }
+                    
+                    // Go to editor
+                    App.switchView('editor');
+                    
+                    // Small delay to let DOM render before rect calcs
+                    setTimeout(() => {
+                        Editor.loadData(rawPoints, bgSrc);
+                    }, 100);
+                    
+                } else {
+                    document.getElementById('recorder-grid').classList.add('hidden');
+                    document.getElementById('recorder-crosshair').classList.add('hidden');
+                    Detector.start();
+                }
+            },
+            
+            stopRecordingAndExit: () => {
+                if(Detector.isRecording) Detector.stop();
+                Camera.stop();
+                App.switchView('dashboard');
+            },
+
+            // --- Editor ---
+            saveTemplate: async () => {
+                const name = document.getElementById('edit-knot-name').value || 'เงื่อนใหม่ (ไม่มีชื่อ)';
+                
+                const newKnot = {
+                    id: 'knot-' + Utils.generateId(),
+                    name: name,
+                    desc: 'สร้างจาก AR Recorder',
+                    difficulty: 'กำหนดเอง',
+                    steps: 1, // simplified
+                    createdAt: new Date().toISOString(),
+                    pathData: Editor.pathData,
+                    thumbnail: document.getElementById('editor-bg-img').src
+                };
+                
+                await DB.save(newKnot);
+                alert("บันทึกต้นแบบสำเร็จ!");
+                App.switchView('library');
+            },
+
+            // --- Library ---
+            renderLibrary: async () => {
+                const grid = document.getElementById('library-grid');
+                grid.innerHTML = '';
+                const knots = await DB.getAll();
+                
+                if(knots.length === 0){
+                    grid.innerHTML = '<div class="text-center text-gray-500 mt-10">ยังไม่มีต้นแบบ</div>';
+                    return;
+                }
+
+                knots.forEach(knot => {
+                    grid.innerHTML += `
+                        <div class="bg-darkCard rounded-2xl border border-gray-800 overflow-hidden mb-4 shadow-lg relative">
+                            <img src="${knot.thumbnail}" class="w-full h-32 object-cover opacity-60">
+                            <div class="absolute top-2 right-2 bg-black/50 backdrop-blur px-2 py-1 rounded text-xs">
+                                ${knot.difficulty}
+                            </div>
+                            <div class="p-4">
+                                <h3 class="font-bold text-lg mb-1">${knot.name}</h3>
+                                <p class="text-xs text-gray-400 mb-4">${knot.desc || 'ไม่มีคำอธิบาย'}</p>
+                                <div class="flex gap-2">
+                                    <button onclick="App.openPractice('${knot.id}')" class="flex-grow bg-primary text-white py-2 rounded-xl text-sm font-medium">
+                                        ฝึกฝน
+                                    </button>
+                                    <button onclick="App.deleteKnot('${knot.id}')" class="bg-red-500/20 text-red-400 px-4 py-2 rounded-xl">
+                                        <i class="ph ph-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+            },
+
+            deleteKnot: async (id) => {
+                if(confirm("ต้องการลบเงื่อนนี้ใช่หรือไม่?")){
+                    await DB.delete(id);
+                    App.renderLibrary();
+                }
+            },
+
+            // --- Practice ---
+            openPractice: async (id) => {
+                const knots = await DB.getAll();
+                const knot = knots.find(k => k.id === id);
+                if (knot) {
+                    App.switchView('practice');
+                    Practice.loadKnot(knot);
+                }
+            }
+        };
+
+        // Boot
         window.addEventListener('DOMContentLoaded', () => {
-            app = new AppController();
+            App.init();
+            
+            // Register PWA Service Worker inline if possible, or assume external
+            if ('serviceWorker' in navigator) {
+                // Since this needs to be a single file artifact delivery but SW requires a separate file logically,
+                // we assume sw.js is deployed alongside. 
+                navigator.serviceWorker.register('sw.js').catch(err => console.log('SW init fail (expected in preview)', err));
+            }
         });
     </script>
 </body>
