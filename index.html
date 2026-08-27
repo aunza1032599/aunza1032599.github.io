@@ -2,571 +2,985 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AR Game: กลไกการป้องกันตัวในเด็ก (Google Apps Script)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SAFE WATER AR - ภารกิจหยุดการจมน้ำ</title>
     
-    <!-- Load Tailwind CSS -->
+    <!-- Fonts & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
     
-    <!-- MediaPipe Libraries (Safe for GAS IFRAME) -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <!-- Tailwind Config for Custom Theme -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { prompt: ['Prompt', 'sans-serif'] },
+                    colors: {
+                        water: { 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7', 900: '#0c4a6e' },
+                        danger: { 500: '#ef4444', 600: '#dc2626' },
+                        warning: { 400: '#facc15', 500: '#eab308' },
+                        safe: { 500: '#22c55e' }
+                    }
+                }
+            }
+        }
+    </script>
 
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            font-family: 'Kanit', sans-serif;
-            background-color: #0f172a; /* Slate 900 fallback */
-            touch-action: none; /* Prevent scrolling on mobile */
+        body { font-family: 'Prompt', sans-serif; overflow: hidden; background-color: #0f172a; color: white; touch-action: none; }
+        
+        /* Glassmorphism */
+        .glass {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
-        #game-container {
-            position: relative;
-            width: 100vw;
-            height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+        .glass-dark {
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        #output_canvas {
-            position: absolute;
-            z-index: 10;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1); /* Mirror camera */
+
+        /* Camera Feed Container */
+        #camera-container {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; overflow: hidden; background: #000;
         }
-        /* ลบ display: flex ซ้ำซ้อนออก ป้องกันปัญหาหน้าจอไม่ยอมซ่อน */
-        .ui-layer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 20;
-            pointer-events: none;
+        #camera-feed {
+            width: 100%; height: 100%; object-fit: cover; transform: scale(1);
         }
-        .interactive-btn {
-            pointer-events: auto;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-            cursor: pointer;
+        
+        /* AR Overlay System */
+        #ar-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none;
         }
-        .interactive-btn:hover {
-            transform: scale(1.05);
-            box-shadow: 0 0 20px rgba(52, 211, 153, 0.8);
+        .ar-object {
+            position: absolute; pointer-events: auto; transform: translate(-50%, -50%);
+            animation: float 3s ease-in-out infinite; cursor: pointer;
         }
-        .loader {
-            border: 6px solid #f3f3f3;
-            border-top: 6px solid #3b82f6;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
+        
+        /* UI Layers */
+        .screen {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 20;
+            display: flex; flex-direction: column; transition: opacity 0.3s;
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .hidden-screen { opacity: 0; pointer-events: none; z-index: -1; }
+
+        /* Animations */
+        @keyframes float {
+            0% { transform: translate(-50%, -50%) translateY(0px); }
+            50% { transform: translate(-50%, -50%) translateY(-15px); }
+            100% { transform: translate(-50%, -50%) translateY(0px); }
         }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        @keyframes popup {
+            0% { transform: scale(0.5); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes scoreFly {
+            0% { transform: translateY(0); opacity: 1; font-size: 1.5rem; }
+            100% { transform: translateY(-50px); opacity: 0; font-size: 2rem; }
+        }
+
+        .anim-pulse-red { animation: pulse-ring 2s infinite; }
+        .anim-popup { animation: popup 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        .floating-score { position: absolute; color: #facc15; font-weight: bold; text-shadow: 0px 2px 4px rgba(0,0,0,0.8); animation: scoreFly 1s ease-out forwards; pointer-events: none; z-index: 50;}
+
+        /* Safe Area for Mobile */
+        .safe-area-pt { padding-top: env(safe-area-inset-top, 20px); }
+        .safe-area-pb { padding-bottom: env(safe-area-inset-bottom, 20px); }
+
+        /* Scrollbar hide */
+        ::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body>
 
-    <div id="game-container">
-        <!-- Hidden video element -->
-        <video id="input_video" style="display: none;" autoplay playsinline muted></video>
-        
-        <!-- Game Canvas -->
-        <canvas id="output_canvas"></canvas>
+    <!-- CAMERA LAYER (Background) -->
+    <div id="camera-container">
+        <video id="camera-feed" autoplay playsinline muted></video>
+        <!-- Fallback background for demo -->
+        <div id="demo-bg" class="hidden absolute inset-0 bg-gradient-to-br from-water-900 to-gray-900 flex items-center justify-center opacity-50">
+            <i class="fas fa-mountain text-6xl text-white/20"></i>
+        </div>
+    </div>
 
-        <!-- Start Screen -->
-        <div id="start-screen" class="ui-layer flex flex-col justify-center items-center bg-slate-900/90 backdrop-blur-md text-white">
-            <h1 class="text-4xl md:text-6xl font-bold mb-4 text-center text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.5)]">
-                🖐️ เกมจับคู่ AR
-            </h1>
-            <h2 class="text-xl md:text-3xl mb-8 text-center px-4">
-                เรียนรู้กลไกการป้องกันตัวในเด็ก <br><span class="text-lg md:text-xl text-slate-300">(Defense Mechanisms)</span>
-            </h2>
-            <div class="bg-white/10 p-6 rounded-2xl max-w-lg mb-8 text-left border border-white/20 shadow-xl">
-                <p class="text-xl mb-3 text-center text-blue-300 font-bold">วิธีการเล่น</p>
-                <ul class="text-base text-slate-200 space-y-2 list-disc list-inside">
-                    <li>อนุญาตให้เบราว์เซอร์เข้าถึง <strong>กล้อง (Camera)</strong></li>
-                    <li>อ่านสถานการณ์ที่ปรากฏบนหน้าจอ</li>
-                    <li><strong>ยกฝ่ามือขึ้นมา</strong> เล็งเป้าไปที่คำตอบที่ถูกต้อง</li>
-                    <li>วางมือค้างไว้ <strong>2 วินาที</strong> เพื่อยืนยันคำตอบ</li>
-                </ul>
+    <!-- AR OVERLAY LAYER -->
+    <div id="ar-overlay"></div>
+
+    <!-- SCREEN: WELCOME -->
+    <div id="screen-welcome" class="screen bg-water-900/90 items-center justify-center p-6">
+        <div class="glass p-8 rounded-3xl max-w-md w-full text-center anim-popup border-t border-white/40 shadow-2xl">
+            <div class="w-24 h-24 mx-auto bg-water-500 rounded-full flex items-center justify-center mb-4 shadow-[0_0_30px_rgba(14,165,233,0.5)]">
+                <i class="fas fa-life-ring text-5xl text-white"></i>
             </div>
-            <button id="start-btn" onclick="initGame()" class="interactive-btn bg-gradient-to-r from-emerald-400 to-teal-500 text-white font-bold py-4 px-12 rounded-full text-2xl border-2 border-white/50">
-                เริ่มเล่นเกมเลย!
-            </button>
-        </div>
+            <h1 class="text-4xl font-bold mb-2 tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-white to-water-400">SAFE WATER AR</h1>
+            <p class="text-water-400 font-semibold mb-6">ภารกิจหยุดการจมน้ำ</p>
+            
+            <div class="space-y-4">
+                <button onclick="App.startFlow()" class="w-full bg-gradient-to-r from-water-500 to-water-600 hover:from-water-400 hover:to-water-500 text-white font-bold py-4 rounded-2xl shadow-lg transform transition active:scale-95 text-lg">
+                    <i class="fas fa-play mr-2"></i> เริ่มภารกิจ
+                </button>
+                <div class="grid grid-cols-2 gap-4">
+                    <button onclick="UI.showScreen('screen-dashboard')" class="glass hover:bg-white/20 text-white font-semibold py-3 rounded-xl transition active:scale-95">
+                        <i class="fas fa-user-shield mr-2"></i> ความก้าวหน้า
+                    </button>
+                    <button onclick="UI.showScreen('screen-leaderboard')" class="glass hover:bg-white/20 text-white font-semibold py-3 rounded-xl transition active:scale-95">
+                        <i class="fas fa-trophy mr-2"></i> อันดับ
+                    </button>
+                </div>
+            </div>
 
-        <!-- Loading Screen -->
-        <div id="loading-screen" class="ui-layer hidden flex-col justify-center items-center bg-slate-900/95 text-white">
-            <div class="loader mb-6"></div>
-            <h2 class="text-2xl font-semibold text-blue-400">กำลังเชื่อมต่อกล้องและ AI...</h2>
-            <p class="text-slate-400 mt-2 text-sm text-center px-4">ระบบกำลังโหลดโมเดลตรวจจับฝ่ามือ<br>หากมี Popup ขึ้นมา กรุณากด "Allow" หรือ "อนุญาต"</p>
-        </div>
-
-        <!-- Game Over Screen -->
-        <div id="game-over-screen" class="ui-layer hidden flex-col justify-center items-center bg-slate-900/95 text-white">
-            <h1 class="text-5xl font-bold mb-6 text-yellow-400 drop-shadow-lg">จบเกม! 🎉</h1>
-            <p class="text-3xl mb-10 bg-slate-800 px-8 py-4 rounded-2xl border border-slate-600">
-                คะแนนรวม: <span id="final-score" class="text-green-400 font-bold text-5xl ml-2">0</span> <span class="text-2xl">/ 5</span>
-            </p>
-            <button id="restart-btn" onclick="restartGame()" class="interactive-btn bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-10 rounded-full text-xl border-2 border-white/30">
-                เล่นอีกครั้ง
-            </button>
-        </div>
-        
-        <!-- Feedback Overlay -->
-        <div id="feedback-overlay" class="ui-layer hidden flex-col justify-center items-center transition-opacity duration-300 bg-black/40">
-            <div id="feedback-box" class="px-10 py-6 rounded-3xl font-bold text-5xl transform scale-0 transition-transform duration-300">
+            <div class="mt-8 text-xs text-gray-400 flex items-center justify-center gap-2">
+                <i class="fas fa-shield-alt"></i> เพื่อการศึกษาและฝึกทักษะ
             </div>
         </div>
     </div>
 
+    <!-- SCREEN: SAFETY & PERMISSION WARNING -->
+    <div id="screen-warning" class="screen bg-black/95 items-center justify-center p-6 hidden-screen">
+        <div class="glass-dark p-8 rounded-3xl max-w-md w-full text-center border-warning-500 border-2">
+            <i class="fas fa-exclamation-triangle text-warning-500 text-6xl mb-4"></i>
+            <h2 class="text-2xl font-bold text-warning-500 mb-4">ข้อควรระวัง!</h2>
+            <p class="mb-4 text-gray-200">เกมนี้เป็นเพียง <span class="font-bold text-white">สถานการณ์จำลอง</span> เพื่อการเรียนรู้</p>
+            <p class="mb-6 text-gray-300 text-sm">เมื่อเกิดเหตุการณ์จริง:<br>1. ตะโกนขอความช่วยเหลือจากผู้ใหญ่<br>2. ห้ามกระโดดลงน้ำไปช่วยเองเด็ดขาด!<br>3. โทร 1669 (ไทย)</p>
+            
+            <div class="bg-gray-800 p-4 rounded-xl mb-6 text-sm text-left border border-gray-700">
+                <p class="font-semibold text-water-400 mb-2"><i class="fas fa-camera mr-2"></i> ข้อกำหนดของระบบ:</p>
+                <ul class="list-disc pl-5 space-y-1 text-gray-400">
+                    <li>ต้องอนุญาตการใช้กล้อง</li>
+                    <li><strong class="text-white">บังคับใช้กล้องหลัง (Rear Camera) เท่านั้น</strong> เพื่อสแกนพื้นที่จริง</li>
+                </ul>
+            </div>
+
+            <button onclick="CameraManager.requestCamera()" class="w-full bg-warning-500 hover:bg-warning-400 text-black font-bold py-4 rounded-2xl shadow-lg transform transition active:scale-95">
+                รับทราบ และเปิดกล้อง
+            </button>
+        </div>
+    </div>
+
+    <!-- SCREEN: ERROR OVERLAY -->
+    <div id="screen-error" class="screen bg-danger-600/95 items-center justify-center p-6 hidden-screen z-50">
+        <div class="bg-white text-black p-8 rounded-3xl max-w-md w-full text-center shadow-2xl">
+            <i class="fas fa-camera-slash text-danger-500 text-5xl mb-4"></i>
+            <h2 class="text-2xl font-bold mb-2" id="error-title">เกิดข้อผิดพลาด</h2>
+            <p class="text-gray-600 mb-6" id="error-desc">ไม่สามารถเข้าถึงกล้องได้</p>
+            <button onclick="window.location.reload()" class="w-full bg-gray-900 text-white font-bold py-3 rounded-xl active:scale-95 transition">
+                ลองใหม่
+            </button>
+        </div>
+    </div>
+
+    <!-- SCREEN: IN-GAME HUD -->
+    <div id="screen-game" class="screen hidden-screen pointer-events-none safe-area-pt safe-area-pb justify-between p-4">
+        <!-- Top Bar -->
+        <div class="flex justify-between items-start pointer-events-auto">
+            <button onclick="GameEngine.quit()" class="glass-dark w-12 h-12 rounded-full flex items-center justify-center text-white active:scale-90 transition">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            
+            <div class="glass-dark px-4 py-2 rounded-full flex items-center gap-3 border border-water-500/30">
+                <i class="fas fa-star text-warning-400"></i>
+                <span id="hud-score" class="font-bold text-xl font-mono">0</span>
+            </div>
+
+            <button onclick="UI.toggleSound()" class="glass-dark w-12 h-12 rounded-full flex items-center justify-center text-white active:scale-90 transition" id="btn-sound">
+                <i class="fas fa-volume-up"></i>
+            </button>
+        </div>
+
+        <!-- Combo & Center Messages -->
+        <div class="flex flex-col items-center justify-center flex-1 pointer-events-none">
+            <div id="hud-message" class="text-3xl font-bold text-center text-white drop-shadow-lg scale-0 transition-transform duration-300"></div>
+            <div id="hud-combo" class="mt-2 text-xl font-bold text-warning-400 drop-shadow-md hidden">Combo x2!</div>
+        </div>
+
+        <!-- Bottom Bar (Mission Info) -->
+        <div class="glass-dark p-4 rounded-2xl pointer-events-auto w-full max-w-md mx-auto border-t border-white/20">
+            <div class="flex justify-between items-end mb-2">
+                <div>
+                    <div class="text-xs text-water-400 font-bold uppercase tracking-wider" id="hud-level">LEVEL 1</div>
+                    <div class="text-lg font-bold" id="hud-mission-title">นักสืบจุดเสี่ยง</div>
+                </div>
+                <div class="text-right">
+                    <div class="text-xs text-gray-400"><i class="fas fa-clock"></i> เวลา</div>
+                    <div class="text-2xl font-mono font-bold text-warning-400" id="hud-timer">00:00</div>
+                </div>
+            </div>
+            <div class="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                <div id="hud-progress" class="bg-gradient-to-r from-water-400 to-safe-500 h-full w-0 transition-all duration-300"></div>
+            </div>
+            <div class="mt-2 text-sm text-gray-300 text-center" id="hud-instruction">ค้นหาจุดเสี่ยงในบริเวณนี้</div>
+        </div>
+    </div>
+
+    <!-- MODAL: QUIZ / SCENARIO -->
+    <div id="modal-quiz" class="absolute inset-0 bg-black/80 z-40 hidden flex items-center justify-center p-4 opacity-0 transition-opacity">
+        <div class="bg-white text-black p-6 rounded-3xl w-full max-w-md transform scale-95 transition-transform" id="quiz-box">
+            <div class="w-16 h-16 bg-danger-100 text-danger-600 rounded-full flex items-center justify-center text-2xl mx-auto mb-4">
+                <i class="fas fa-question"></i>
+            </div>
+            <h3 class="text-xl font-bold text-center mb-6" id="quiz-question">เด็กกำลังตกน้ำ คุณจะทำอย่างไร?</h3>
+            <div class="space-y-3" id="quiz-options">
+                <!-- Injected via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: LEVEL COMPLETE -->
+    <div id="modal-level-complete" class="absolute inset-0 bg-water-900/90 z-50 hidden flex items-center justify-center p-6 opacity-0 transition-opacity">
+        <div class="glass p-8 rounded-3xl w-full max-w-md text-center text-white border border-white/30">
+            <i class="fas fa-check-circle text-6xl text-safe-500 mb-4"></i>
+            <h2 class="text-3xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-safe-400 to-water-300" id="complete-title">ภารกิจสำเร็จ!</h2>
+            
+            <div class="my-6 glass-dark p-4 rounded-xl">
+                <div class="text-sm text-gray-400 mb-1">คะแนนด่านนี้</div>
+                <div class="text-4xl font-mono font-bold text-warning-400" id="complete-score">+150</div>
+            </div>
+            
+            <div id="new-badge-alert" class="hidden bg-warning-500/20 border border-warning-500/50 p-4 rounded-xl mb-6">
+                <div class="text-warning-400 text-sm font-bold mb-2">🎉 ปลดล็อกเหรียญตราใหม่!</div>
+                <i id="new-badge-icon" class="fas fa-medal text-4xl text-warning-400 mb-2"></i>
+                <div id="new-badge-name" class="font-bold">Beginner</div>
+            </div>
+
+            <button onclick="GameEngine.nextLevel()" class="w-full bg-water-500 hover:bg-water-400 text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition">
+                ลุยต่อภารกิจถัดไป <i class="fas fa-arrow-right ml-2"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- SCREEN: DASHBOARD -->
+    <div id="screen-dashboard" class="screen bg-gray-900 hidden-screen overflow-y-auto pb-10">
+        <div class="p-6 safe-area-pt">
+            <button onclick="UI.showScreen('screen-welcome')" class="text-gray-400 mb-6 hover:text-white"><i class="fas fa-arrow-left mr-2"></i> กลับหน้าหลัก</button>
+            <h2 class="text-3xl font-bold mb-6">ความก้าวหน้าของฉัน</h2>
+            
+            <!-- Stats -->
+            <div class="grid grid-cols-2 gap-4 mb-8">
+                <div class="glass-dark p-4 rounded-2xl border border-gray-700">
+                    <div class="text-gray-400 text-sm">คะแนนรวม</div>
+                    <div class="text-3xl font-bold text-water-400 font-mono" id="dash-total-score">0</div>
+                </div>
+                <div class="glass-dark p-4 rounded-2xl border border-gray-700">
+                    <div class="text-gray-400 text-sm">ภารกิจที่ผ่าน</div>
+                    <div class="text-3xl font-bold text-safe-500 font-mono" id="dash-levels">0/5</div>
+                </div>
+            </div>
+
+            <!-- Badges -->
+            <h3 class="text-xl font-bold mb-4">เหรียญตราแห่งความปลอดภัย <span class="text-sm text-gray-400 font-normal">(<span id="dash-badge-count">0</span>/5)</span></h3>
+            <div class="grid grid-cols-3 gap-3" id="dash-badges">
+                <!-- Injected via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN: LEADERBOARD -->
+    <div id="screen-leaderboard" class="screen bg-gray-900 hidden-screen overflow-y-auto pb-10">
+         <div class="p-6 safe-area-pt">
+            <button onclick="UI.showScreen('screen-welcome')" class="text-gray-400 mb-6 hover:text-white"><i class="fas fa-arrow-left mr-2"></i> กลับหน้าหลัก</button>
+            <h2 class="text-3xl font-bold mb-6 text-center text-warning-400"><i class="fas fa-trophy"></i> LEADERBOARD</h2>
+            
+            <div class="glass-dark rounded-3xl p-2 border border-gray-700" id="leaderboard-list">
+                <!-- Mock Data Injected via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- DEBUG PANEL -->
+    <div id="debug-panel" class="hidden absolute top-0 right-0 w-64 bg-black/80 text-green-400 font-mono text-xs p-4 z-[100] h-full border-l border-green-500/30 overflow-y-auto pointer-events-auto">
+        <h3 class="text-white font-bold mb-2 border-b border-green-500 pb-1">DEBUG / DEVELOPER</h3>
+        <div id="debug-log" class="space-y-1"></div>
+        <button onclick="location.href=location.pathname" class="mt-4 bg-gray-800 text-white px-2 py-1 rounded w-full">Exit Debug</button>
+    </div>
+
     <script>
-        // Game Questions Database
-        const quizData = [
+        /**
+         * SAFE WATER AR - Core Application Logic
+         * Single-file implementation for deployment compatibility.
+         */
+
+        // --- GLOBAL CONFIG & STATE ---
+        const CONFIG = {
+            targetWidth: 1280,
+            targetHeight: 720,
+            demoMode: new URLSearchParams(window.location.search).has('demo'),
+            debugMode: new URLSearchParams(window.location.search).has('debug'),
+        };
+
+        const AppState = {
+            score: 0,
+            currentLevel: 1,
+            combo: 0,
+            unlockedBadges: [],
+            soundEnabled: true,
+            isGameRunning: false
+        };
+
+        // --- MOCK DATA ---
+        const Badges = [
+            { id: 'b1', name: 'Beginner', icon: 'fa-seedling', desc: 'เริ่มเรียนรู้ความปลอดภัย', reqScore: 50 },
+            { id: 'b2', name: 'Water Watcher', icon: 'fa-eye', desc: 'สังเกตจุดเสี่ยงแม่นยำ', reqScore: 200 },
+            { id: 'b3', name: 'Rescue Thinker', icon: 'fa-brain', desc: 'ตัดสินใจได้อย่างถูกต้อง', reqScore: 400 },
+            { id: 'b4', name: 'Safety Expert', icon: 'fa-shield-alt', desc: 'ผู้เชี่ยวชาญความปลอดภัย', reqScore: 700 },
+            { id: 'b5', name: 'Hero', icon: 'fa-crown', desc: 'ฮีโร่ป้องกันการจมน้ำ', reqScore: 1000 }
+        ];
+
+        const LeaderboardMock = [
+            { name: "น้องภูมิ", score: 1250 },
+            { name: "ด.ญ.น้ำใส", score: 1100 },
+            { name: "กล้าหาญ", score: 950 },
+            { name: "คุณ (You)", score: 0, isPlayer: true },
+            { name: "มานี", score: 420 }
+        ];
+
+        // Level Definitions
+        const Levels = [
             {
-                scenario: "น้องบอยทำแก้วน้ำแตก แต่พอบอกแม่กลับพูดว่า 'แมวชนแตกต่างหาก หนูไม่ได้ทำ!'",
-                options: ["Projection (โยนความผิด)", "Denial (ปฏิเสธความจริง)", "Regression (ถดถอย)"],
-                correctIndex: 0
+                level: 1, title: "นักสืบจุดเสี่ยง", type: "ar_find", time: 30,
+                instruction: "ขยับกล้องซ้ายขวา หาสัญลักษณ์ ⚠️ แล้วแตะให้ครบ 3 จุด",
+                targetCount: 3,
+                spawnItems: ['⚠️', '⚠️', '⚠️', '🐟', '🦆'] // Some distractors
             },
             {
-                scenario: "น้องแอนอายุ 6 ขวบ เลิกดูดนิ้วไปนานแล้ว แต่พอแม่มีน้องทารกคนใหม่ น้องแอนก็กลับมาดูดนิ้วอีกครั้ง",
-                options: ["Rationalization (หาเหตุผล)", "Displacement (ย้ายที่อารมณ์)", "Regression (ถดถอย)"],
-                correctIndex: 2
+                level: 2, title: "เกิดเหตุแล้ว!", type: "quiz", time: 0,
+                instruction: "ประเมินสถานการณ์ฉุกเฉิน",
+                question: "พบเพื่อนลื่นตกลงไปในบ่อน้ำลึก คุณจะทำอย่างไร?",
+                options: [
+                    { text: "รีบกระโดดลงไปช่วยทันที", correct: false, reason: "ผิด! คุณอาจจมน้ำไปด้วย" },
+                    { text: "ตะโกนเรียกผู้ใหญ่ และหาไม้หรือเชือกยื่นให้", correct: true, reason: "ถูกต้อง! ตะโกน โยน ยื่น คือวิธีที่ปลอดภัยที่สุด" },
+                    { text: "วิ่งหนีเพราะกลัวความผิด", correct: false, reason: "ผิด! เพื่อนอาจได้รับอันตรายถึงชีวิต" }
+                ]
             },
             {
-                scenario: "โดนคุณครูดุที่โรงเรียน พอกลับบ้านมาโกรธมาก เลยเตะตุ๊กตาตัวโปรดกระจุยกระจาย",
-                options: ["Displacement (ย้ายที่อารมณ์)", "Projection (โยนความผิด)", "Denial (ปฏิเสธความจริง)"],
-                correctIndex: 0
+                level: 3, title: "เลือกอุปกรณ์กู้ชีพ", type: "ar_catch", time: 20,
+                instruction: "แตะเลือกเฉพาะอุปกรณ์ที่ช่วยคนตกน้ำได้",
+                targetCount: 3,
+                spawnItems: [
+                    { icon: '🛟', correct: true }, { icon: '🪵', correct: true }, { icon: '🧴', correct: true }, // 🧴 = แกลลอนพลาสติกเปล่า
+                    { icon: '📱', correct: false }, { icon: '🍔', correct: false }, { icon: '🎒', correct: false }
+                ]
             },
             {
-                scenario: "สอบตกวิชาคณิตศาสตร์ แทนที่จะยอมรับว่าไม่ได้อ่านหนังสือ กลับบอกว่า 'ข้อสอบมันยากเกินไป ใครๆ ก็ทำไม่ได้หรอก'",
-                options: ["Denial (ปฏิเสธความจริง)", "Rationalization (หาเหตุผล)", "Regression (ถดถอย)"],
-                correctIndex: 1
+                level: 4, title: "ปลอดภัย หรือ อันตราย?", type: "quiz", time: 0,
+                instruction: "วิเคราะห์พฤติกรรม",
+                question: "เด็กอนุบาล 2 คน ชวนกันไปตักปลาที่ริมคลองน้ำเชี่ยว โดยไม่มีผู้ใหญ่ไปด้วย",
+                options: [
+                    { text: "🟢 ปลอดภัย (SAFE)", correct: false, reason: "ผิด! เด็กเล็กไม่ควรอยู่ใกล้น้ำลำพัง" },
+                    { text: "🔴 อันตราย (UNSAFE)", correct: true, reason: "ถูกต้อง! เสี่ยงพลัดตกน้ำสูงมาก ต้องมีผู้ดูแลเสมอ" }
+                ]
             },
             {
-                scenario: "แอบกินขนมเค้กของพี่สาวจนหมด แต่พอบอกว่าใครกิน ก็ตอบหน้าตาเฉยว่า 'เปล่านะ ไม่รู้เรื่อง ไม่ได้กิน'",
-                options: ["Denial (ปฏิเสธความจริง)", "Displacement (ย้ายที่อารมณ์)", "Rationalization (หาเหตุผล)"],
-                correctIndex: 0
+                level: 5, title: "WATER SAFETY HERO", type: "ar_find", time: 15,
+                instruction: "เวลาจำกัด! รีบหาจุดเสี่ยงให้ครบ 5 จุด",
+                targetCount: 5,
+                spawnItems: ['⚠️','⚠️','⚠️','⚠️','⚠️']
             }
         ];
 
-        // Core Elements
-        const videoElement = document.getElementById('input_video');
-        const canvasElement = document.getElementById('output_canvas');
-        const canvasCtx = canvasElement.getContext('2d');
+        // --- STREAMING_CHUNK:Utility and Core Managers (Audio, Debug, UI) ---
         
-        // UI Elements
-        const startScreen = document.getElementById('start-screen');
-        const loadingScreen = document.getElementById('loading-screen');
-        const gameOverScreen = document.getElementById('game-over-screen');
-        const feedbackOverlay = document.getElementById('feedback-overlay');
-        const feedbackBox = document.getElementById('feedback-box');
-        
-        // State Variables
-        let camera = null;
-        let hands = null;
-        let currentQuestionIndex = 0;
-        let score = 0;
-        let isPlaying = false;
-        let isTransitioning = false; 
-        
-        // Selection Variables
-        let hoveredOptionIndex = -1;
-        let hoverStartTime = 0;
-        const HOVER_THRESHOLD_MS = 2000; // Increased to 2 seconds for better deliberate selection
-        let optionBoxes = [];
+        // Audio Synthesizer (No external assets)
+        const AudioSys = {
+            ctx: null,
+            init() { if(!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); },
+            playTone(freq, type, duration, vol=0.1) {
+                if(!AppState.soundEnabled) return;
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = type; osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+                osc.connect(gain); gain.connect(this.ctx.destination);
+                osc.start(); osc.stop(this.ctx.currentTime + duration);
+            },
+            correct() { this.playTone(600, 'sine', 0.1); setTimeout(()=>this.playTone(800, 'sine', 0.2), 100); },
+            wrong() { this.playTone(300, 'sawtooth', 0.3); },
+            pop() { this.playTone(500, 'sine', 0.05, 0.05); },
+            win() { [400,500,600,800,1000].forEach((f,i) => setTimeout(()=>this.playTone(f, 'square', 0.1), i*100)); }
+        };
 
-        function resizeCanvas() {
-            // Slight delay ensures Google Apps Script iframe has updated its dimensions
-            setTimeout(() => {
-                canvasElement.width = window.innerWidth;
-                canvasElement.height = window.innerHeight;
-            }, 100);
-        }
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
-
-        function drawRoundedRect(ctx, x, y, width, height, radius) {
-            ctx.beginPath();
-            ctx.moveTo(x + radius, y);
-            ctx.lineTo(x + width - radius, y);
-            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-            ctx.lineTo(x + width, y + height - radius);
-            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-            ctx.lineTo(x + radius, y + height);
-            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-            ctx.lineTo(x, y + radius);
-            ctx.quadraticCurveTo(x, y, x + radius, y);
-            ctx.closePath();
-        }
-
-        function wrapText(context, text, x, y, maxWidth, lineHeight) {
-            const words = text.split(' ');
-            let line = '';
-            let lines = [];
-
-            for(let n = 0; n < words.length; n++) {
-                let testLine = line + words[n] + ' ';
-                let metrics = context.measureText(testLine);
-                let testWidth = metrics.width;
-                if (testWidth > maxWidth && n > 0) {
-                    lines.push(line);
-                    line = words[n] + ' ';
-                } else {
-                    line = testLine;
-                }
-            }
-            lines.push(line);
-            
-            let startY = y - ((lines.length - 1) * lineHeight) / 2;
-            for(let k = 0; k < lines.length; k++) {
-                context.fillText(lines[k], x, startY + (k * lineHeight));
+        // Debug Logger
+        function logDebug(msg) {
+            console.log(msg);
+            if(CONFIG.debugMode) {
+                const log = document.getElementById('debug-log');
+                log.innerHTML = `<div class="mb-1 border-b border-green-900 pb-1">> ${msg}</div>` + log.innerHTML;
             }
         }
 
-        function drawGameUI() {
-            if (!isPlaying || isTransitioning) return;
-            
-            const questionData = quizData[currentQuestionIndex];
-            const cw = canvasElement.width;
-            const ch = canvasElement.height;
-            
-            // Un-flip context for drawing text properly over mirrored camera
-            canvasCtx.save();
-            canvasCtx.translate(cw, 0);
-            canvasCtx.scale(-1, 1);
-            
-            // 1. Top Bar (Score & Progress)
-            canvasCtx.fillStyle = "rgba(15, 23, 42, 0.7)"; // slate-900
-            drawRoundedRect(canvasCtx, 20, 20, 220, 50, 15);
-            canvasCtx.fill();
-            canvasCtx.fillStyle = "white";
-            canvasCtx.font = "22px Kanit";
-            canvasCtx.textAlign = "left";
-            canvasCtx.fillText(`ข้อที่: ${currentQuestionIndex + 1} / ${quizData.length}`, 40, 53);
-            
-            canvasCtx.fillStyle = "rgba(15, 23, 42, 0.7)";
-            drawRoundedRect(canvasCtx, cw - 180, 20, 160, 50, 15);
-            canvasCtx.fill();
-            canvasCtx.fillStyle = "#4ade80"; // green-400
-            canvasCtx.fillText(`คะแนน: ${score}`, cw - 160, 53);
-
-            // 2. Question Box
-            const qBoxWidth = Math.min(cw * 0.85, 800);
-            const qBoxHeight = 160;
-            const qBoxX = (cw - qBoxWidth) / 2;
-            const qBoxY = 90;
-            
-            canvasCtx.shadowColor = "rgba(0, 0, 0, 0.5)";
-            canvasCtx.shadowBlur = 15;
-            canvasCtx.shadowOffsetY = 5;
-            canvasCtx.fillStyle = "rgba(255, 255, 255, 0.95)";
-            drawRoundedRect(canvasCtx, qBoxX, qBoxY, qBoxWidth, qBoxHeight, 20);
-            canvasCtx.fill();
-            canvasCtx.shadowBlur = 0;
-            canvasCtx.shadowOffsetY = 0;
-            
-            canvasCtx.fillStyle = "#0f172a";
-            canvasCtx.font = "bold 26px Kanit";
-            canvasCtx.textAlign = "center";
-            canvasCtx.textBaseline = "middle";
-            wrapText(canvasCtx, "สถานการณ์: " + questionData.scenario, qBoxX + qBoxWidth/2, qBoxY + qBoxHeight/2, qBoxWidth - 40, 38);
-
-            // 3. Option Boxes
-            optionBoxes = [];
-            const optCount = questionData.options.length;
-            const gap = 20;
-            const isMobile = cw < 768;
-            
-            // Adjust layout for mobile (stack vertically if too narrow, or use smaller boxes)
-            const optBoxWidth = isMobile ? Math.min(cw - 40, 400) : Math.min(320, (cw - (gap * (optCount+1))) / optCount);
-            const optBoxHeight = isMobile ? 90 : 120;
-            
-            // If mobile, stack them vertically. If desktop, horizontal row.
-            const startX = isMobile ? (cw - optBoxWidth) / 2 : (cw - ((optBoxWidth * optCount) + (gap * (optCount - 1)))) / 2;
-            let startY = isMobile ? ch - (optBoxHeight * optCount) - (gap * optCount) - 20 : ch - optBoxHeight - 60;
-
-            for (let i = 0; i < optCount; i++) {
-                const ox = isMobile ? startX : startX + (i * (optBoxWidth + gap));
-                const oy = isMobile ? startY + (i * (optBoxHeight + gap)) : startY;
-                
-                optionBoxes.push({ x: ox, y: oy, width: optBoxWidth, height: optBoxHeight, index: i });
-
-                const isHovered = (hoveredOptionIndex === i);
-                
-                // Box Styling
-                if (isHovered) {
-                    canvasCtx.fillStyle = "#3b82f6"; // blue-500
-                    canvasCtx.shadowColor = "rgba(59, 130, 246, 0.8)";
-                    canvasCtx.shadowBlur = 20;
-                    drawRoundedRect(canvasCtx, ox - 4, oy - 4, optBoxWidth + 8, optBoxHeight + 8, 20);
-                } else {
-                    canvasCtx.fillStyle = "rgba(255, 255, 255, 0.9)";
-                    canvasCtx.shadowColor = "rgba(0,0,0,0.2)";
-                    canvasCtx.shadowBlur = 10;
-                    drawRoundedRect(canvasCtx, ox, oy, optBoxWidth, optBoxHeight, 20);
+        // UI Manager
+        const UI = {
+            screens: ['screen-welcome', 'screen-warning', 'screen-game', 'screen-error', 'screen-dashboard', 'screen-leaderboard'],
+            showScreen(id) {
+                this.screens.forEach(s => {
+                    const el = document.getElementById(s);
+                    if(s === id) { el.classList.remove('hidden-screen'); }
+                    else { el.classList.add('hidden-screen'); }
+                });
+            },
+            showError(title, desc) {
+                document.getElementById('error-title').innerText = title;
+                document.getElementById('error-desc').innerText = desc;
+                this.showScreen('screen-error');
+            },
+            toggleSound() {
+                AppState.soundEnabled = !AppState.soundEnabled;
+                document.getElementById('btn-sound').innerHTML = AppState.soundEnabled ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute text-gray-500"></i>';
+                if(AppState.soundEnabled) AudioSys.init();
+            },
+            updateHUD() {
+                document.getElementById('hud-score').innerText = AppState.score;
+                document.getElementById('hud-level').innerText = `LEVEL ${AppState.currentLevel}`;
+                const lv = Levels[AppState.currentLevel-1];
+                if(lv) {
+                    document.getElementById('hud-mission-title').innerText = lv.title;
+                    document.getElementById('hud-instruction').innerText = lv.instruction;
                 }
-                canvasCtx.fill();
-                canvasCtx.shadowBlur = 0; // reset
+            },
+            showMessage(text, color='text-white') {
+                const msg = document.getElementById('hud-message');
+                msg.innerText = text;
+                msg.className = `text-4xl font-black text-center drop-shadow-[0_4px_4px_rgba(0,0,0,0.8)] transition-transform duration-300 scale-100 ${color}`;
+                setTimeout(() => { msg.classList.remove('scale-100'); msg.classList.add('scale-0'); }, 1500);
+            },
+            spawnFloatingScore(x, y, amount) {
+                const el = document.createElement('div');
+                el.className = `floating-score ${amount > 0 ? 'text-warning-400' : 'text-danger-500'}`;
+                el.innerText = amount > 0 ? `+${amount}` : amount;
+                el.style.left = `${x}px`;
+                el.style.top = `${y}px`;
+                document.body.appendChild(el);
+                setTimeout(() => el.remove(), 1000);
+            },
+            refreshDashboard() {
+                document.getElementById('dash-total-score').innerText = AppState.score;
+                document.getElementById('dash-levels').innerText = `${AppState.currentLevel-1}/5`;
                 
-                // Text inside box
-                canvasCtx.fillStyle = isHovered ? "white" : "#1e293b";
-                canvasCtx.font = isMobile ? "bold 20px Kanit" : "bold 22px Kanit";
-                wrapText(canvasCtx, questionData.options[i], ox + optBoxWidth/2, oy + optBoxHeight/2, optBoxWidth - 20, 28);
+                const badgeContainer = document.getElementById('dash-badges');
+                badgeContainer.innerHTML = '';
+                let count = 0;
+                Badges.forEach(b => {
+                    const has = AppState.unlockedBadges.includes(b.id);
+                    if(has) count++;
+                    badgeContainer.innerHTML += `
+                        <div class="glass-dark p-3 rounded-xl text-center border ${has ? 'border-warning-500/50' : 'border-gray-800 opacity-40'}">
+                            <i class="fas ${b.icon} text-3xl mb-2 ${has ? 'text-warning-400' : 'text-gray-600'}"></i>
+                            <div class="text-xs font-bold ${has ? 'text-white' : 'text-gray-500'}">${b.name}</div>
+                        </div>
+                    `;
+                });
+                document.getElementById('dash-badge-count').innerText = count;
+
+                // Update mock leaderboard
+                const lbList = document.getElementById('leaderboard-list');
+                lbList.innerHTML = '';
+                // Update player score in mock
+                const playerEntry = LeaderboardMock.find(x => x.isPlayer);
+                if(playerEntry) playerEntry.score = AppState.score;
                 
-                // Loading Progress Bar Overlay
-                if (isHovered && hoverStartTime > 0) {
-                    const elapsed = performance.now() - hoverStartTime;
-                    const progress = Math.min(elapsed / HOVER_THRESHOLD_MS, 1);
-                    
-                    canvasCtx.fillStyle = "rgba(16, 185, 129, 0.5)"; // emerald-500
-                    const fillWidth = optBoxWidth * progress;
-                    
-                    // Fill from left to right
-                    canvasCtx.beginPath();
-                    // Clip to rounded rect to keep it neat
-                    drawRoundedRect(canvasCtx, ox, oy, optBoxWidth, optBoxHeight, 20);
-                    canvasCtx.clip();
-                    canvasCtx.fillRect(ox, oy, fillWidth, optBoxHeight);
-                    
-                    // Reset clip
-                    canvasCtx.beginPath();
-                    canvasCtx.rect(0,0,cw,ch);
-                    canvasCtx.clip();
-                }
+                LeaderboardMock.sort((a,b) => b.score - a.score).forEach((entry, idx) => {
+                    let medal = idx === 0 ? 'text-yellow-400' : idx === 1 ? 'text-gray-300' : idx === 2 ? 'text-yellow-600' : 'text-transparent';
+                    let bg = entry.isPlayer ? 'bg-water-900/50 border-water-500/50' : 'border-transparent';
+                    lbList.innerHTML += `
+                        <div class="flex items-center justify-between p-3 border-b border-gray-700 last:border-0 rounded-xl ${bg}">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 text-center font-bold text-gray-500">${idx+1}</div>
+                                <i class="fas fa-medal text-xl ${medal}"></i>
+                                <div class="font-semibold ${entry.isPlayer ? 'text-water-300' : 'text-white'}">${entry.name}</div>
+                            </div>
+                            <div class="font-mono font-bold text-warning-400">${entry.score}</div>
+                        </div>
+                    `;
+                });
             }
-            canvasCtx.restore();
-        }
+        };
 
-        function onResults(results) {
-            const cw = canvasElement.width;
-            const ch = canvasElement.height;
+        // --- STREAMING_CHUNK:Implementing CameraManager (Crucial Backend/API integration) ---
+        /**
+         * CameraManager handles strict environment (rear) camera validation.
+         */
+        const CameraManager = {
+            stream: null,
+            videoEl: document.getElementById('camera-feed'),
             
-            canvasCtx.save();
-            canvasCtx.clearRect(0, 0, cw, ch);
-            
-            // Draw raw camera feed
-            canvasCtx.drawImage(results.image, 0, 0, cw, ch);
-            
-            // Draw UI Layers
-            drawGameUI();
-
-            if (isPlaying && !isTransitioning && results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                const landmarks = results.multiHandLandmarks[0];
-                const pointer = landmarks[9]; // Base of middle finger
+            async requestCamera() {
+                logDebug("Requesting Camera...");
+                UI.showScreen('screen-game'); // Switch immediately to prevent lag feel, then init
                 
-                // Mapping coordinate for CSS-mirrored canvas
-                const handX = (1 - pointer.x) * cw;
-                const handY = pointer.y * ch;
-
-                // Draw Virtual Cursor
-                canvasCtx.beginPath();
-                canvasCtx.arc(pointer.x * cw, pointer.y * ch, 25, 0, 2 * Math.PI);
-                canvasCtx.fillStyle = "rgba(16, 185, 129, 0.6)"; // emerald-500
-                canvasCtx.fill();
-                canvasCtx.lineWidth = 4;
-                canvasCtx.strokeStyle = "white";
-                canvasCtx.stroke();
-                
-                canvasCtx.beginPath();
-                canvasCtx.arc(pointer.x * cw, pointer.y * ch, 6, 0, 2 * Math.PI);
-                canvasCtx.fillStyle = "white";
-                canvasCtx.fill();
-
-                // Collision Detection with UI boxes
-                let currentHover = -1;
-                for (const box of optionBoxes) {
-                    if (handX >= box.x && handX <= box.x + box.width &&
-                        handY >= box.y && handY <= box.y + box.height) {
-                        currentHover = box.index;
-                        break;
-                    }
+                if (CONFIG.demoMode) {
+                    logDebug("DEMO MODE: Bypassing Camera.");
+                    document.getElementById('demo-bg').classList.remove('hidden');
+                    GameEngine.start();
+                    return;
                 }
 
-                // Handle Selection Timer
-                if (currentHover !== -1) {
-                    if (hoveredOptionIndex !== currentHover) {
-                        hoveredOptionIndex = currentHover;
-                        hoverStartTime = performance.now();
-                    } else {
-                        const elapsed = performance.now() - hoverStartTime;
-                        if (elapsed >= HOVER_THRESHOLD_MS) {
-                            handleAnswerSelection(currentHover);
-                        }
-                    }
-                } else {
-                    hoveredOptionIndex = -1;
-                    hoverStartTime = 0;
-                }
-            } else {
-                 hoveredOptionIndex = -1;
-                 hoverStartTime = 0;
-            }
-            canvasCtx.restore();
-        }
-
-        function handleAnswerSelection(selectedIndex) {
-            if (isTransitioning) return;
-            isTransitioning = true;
-            
-            const questionData = quizData[currentQuestionIndex];
-            const isCorrect = selectedIndex === questionData.correctIndex;
-            
-            if (isCorrect) {
-                score++;
-                showFeedback(true, "ถูกต้อง! 🎉");
-            } else {
-                showFeedback(false, "ผิดจ้า! ❌<br><span class='text-2xl mt-4 block text-red-100 bg-red-900/50 px-4 py-2 rounded-xl'>คำตอบที่ถูกคือ: " + questionData.options[questionData.correctIndex] + "</span>");
-            }
-            
-            setTimeout(() => {
-                currentQuestionIndex++;
-                if (currentQuestionIndex < quizData.length) {
-                    isTransitioning = false;
-                    hoveredOptionIndex = -1;
-                    hideFeedback();
-                } else {
-                    endGame();
-                }
-            }, 3000); // Show feedback for 3 seconds
-        }
-
-        function showFeedback(isCorrect, htmlText) {
-            feedbackOverlay.classList.remove('hidden');
-            feedbackOverlay.classList.add('flex');
-            
-            feedbackBox.innerHTML = htmlText;
-            
-            if (isCorrect) {
-                feedbackBox.className = "px-12 py-10 rounded-3xl font-bold text-5xl md:text-6xl text-center shadow-[0_0_50px_rgba(74,222,128,0.8)] transform scale-0 transition-transform duration-300 bg-green-500 text-white border-4 border-white";
-            } else {
-                feedbackBox.className = "px-12 py-10 rounded-3xl font-bold text-4xl md:text-5xl text-center shadow-[0_0_50px_rgba(248,113,113,0.8)] transform scale-0 transition-transform duration-300 bg-red-500 text-white border-4 border-white";
-            }
-            
-            // Pop animation
-            setTimeout(() => {
-                feedbackBox.classList.remove('scale-0');
-                feedbackBox.classList.add('scale-100');
-            }, 50);
-        }
-
-        function hideFeedback() {
-            feedbackBox.classList.remove('scale-100');
-            feedbackBox.classList.add('scale-0');
-            setTimeout(() => {
-                feedbackOverlay.style.display = 'none';
-                feedbackOverlay.classList.add('hidden');
-                feedbackOverlay.classList.remove('flex');
-            }, 300);
-        }
-
-        function endGame() {
-            isPlaying = false;
-            hideFeedback();
-            document.getElementById('final-score').innerText = score;
-            
-            // ใช้ style.display เพื่อบังคับแสดงผล 100%
-            gameOverScreen.style.display = 'flex';
-            gameOverScreen.classList.remove('hidden');
-        }
-
-        function restartGame() {
-            score = 0;
-            currentQuestionIndex = 0;
-            isTransitioning = false;
-            hoveredOptionIndex = -1;
-            
-            gameOverScreen.style.display = 'none';
-            gameOverScreen.classList.add('hidden');
-            
-            isPlaying = true;
-            window.processVideoFrame(); // Resume frame processing if needed
-        }
-
-        async function initGame() {
-            // 1. บังคับซ่อนหน้าจอ Start Screen ทันทีที่กด
-            startScreen.style.display = 'none';
-            startScreen.classList.add('hidden');
-            
-            loadingScreen.style.display = 'flex';
-            loadingScreen.classList.remove('hidden');
-
-            try {
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                    throw new Error("เบราว์เซอร์ไม่รองรับ API กล้อง (ต้องการ HTTPS)");
+                    UI.showError("ไม่รองรับการใช้งาน", "เบราว์เซอร์นี้ไม่รองรับการใช้งานกล้อง กรุณาใช้ Chrome หรือ Safari รุ่นล่าสุด และต้องเปิดผ่าน HTTPS");
+                    return;
                 }
 
-                // 2. ปลดล็อคการจำกัดความละเอียดวิดีโอ (บางกล้อง Error ทันทีถ้ากำหนดตายตัว)
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "user" } 
-                });
-                
-                videoElement.srcObject = stream;
-                videoElement.muted = true;
-                videoElement.setAttribute('playsinline', ''); // สำคัญมากสำหรับ iPhone/iPad ไม่งั้นจอดำ
-                await videoElement.play();
+                try {
+                    // CRITICAL: Request Environment camera strictly
+                    const constraints = {
+                        audio: false,
+                        video: {
+                            facingMode: { exact: "environment" },
+                            width: { ideal: CONFIG.targetWidth },
+                            height: { ideal: CONFIG.targetHeight }
+                        }
+                    };
+                    
+                    logDebug("Attempting exact environment camera...");
+                    this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    this.attachStream();
+                    
+                } catch (err) {
+                    logDebug("Exact environment failed: " + err.name);
+                    
+                    // Fallback to general request and check settings
+                    if (err.name === 'OverconstrainedError' || err.name === 'NotReadableError') {
+                        try {
+                            logDebug("Attempting fallback camera request...");
+                            this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                            
+                            // Verify facing mode
+                            const track = this.stream.getVideoTracks()[0];
+                            const settings = track.getSettings();
+                            
+                            // Some desktops return empty facingMode, reject if strict mobile app feel is needed, 
+                            // but usually we allow if facingMode isn't explicitly 'user'.
+                            if (settings.facingMode === 'user') {
+                                this.stop();
+                                UI.showError("พบกล้องหน้า", "เกมนี้จำเป็นต้องใช้กล้องหลัง (Rear Camera) เท่านั้น เพื่อสแกนพื้นที่จริง");
+                                return;
+                            }
+                            this.attachStream();
 
-                // Config MediaPipe
-                hands = new Hands({locateFile: (file) => {
-                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-                }});
-                
-                hands.setOptions({
-                    maxNumHands: 1, 
-                    modelComplexity: 1, 
-                    minDetectionConfidence: 0.7,
-                    minTrackingConfidence: 0.7
-                });
-                
-                hands.onResults(onResults);
-                
-                // 3. เริ่มส่งภาพ
-                isPlaying = true;
-                loadingScreen.style.display = 'none';
-                loadingScreen.classList.add('hidden');
-
-                window.processVideoFrame = async function() {
-                    if (isPlaying && !videoElement.paused && !videoElement.ended) {
-                        await hands.send({image: videoElement});
-                        requestAnimationFrame(window.processVideoFrame);
+                        } catch (fallbackErr) {
+                            this.handlePermissionError(fallbackErr);
+                        }
+                    } else {
+                        this.handlePermissionError(err);
                     }
+                }
+            },
+
+            attachStream() {
+                this.videoEl.srcObject = this.stream;
+                this.videoEl.onloadedmetadata = () => {
+                    this.videoEl.play();
+                    logDebug("Camera playing. Res: " + this.videoEl.videoWidth + "x" + this.videoEl.videoHeight);
+                    GameEngine.start();
+                };
+            },
+
+            handlePermissionError(err) {
+                logDebug("Camera Error: " + err.message);
+                if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                    UI.showError("ปฏิเสธการเข้าถึงกล้อง", "กรุณาอนุญาต Camera Permission ในการตั้งค่าเบราว์เซอร์");
+                } else {
+                    UI.showError("ไม่พบกล้อง", "ไม่พบกล้องหลัง หรือเกิดข้อผิดพลาด: " + err.message);
+                }
+            },
+
+            stop() {
+                if (this.stream) {
+                    this.stream.getTracks().forEach(track => { track.stop(); logDebug("Camera track stopped."); });
+                    this.videoEl.srcObject = null;
+                }
+            }
+        };
+
+        // --- STREAMING_CHUNK:AR Engine (Simulating DOM overlays over Video) ---
+        const AREngine = {
+            container: document.getElementById('ar-overlay'),
+            activeObjects: [],
+            
+            clear() {
+                this.container.innerHTML = '';
+                this.activeObjects = [];
+            },
+
+            // Spawns an interactive HTML element simulating an AR anchor
+            spawn(type, itemData, onClickCallback) {
+                const el = document.createElement('div');
+                el.className = 'ar-object anim-pulse-red glass p-3 rounded-full shadow-xl flex items-center justify-center text-4xl';
+                
+                // Random position within safe zone (10% to 90% of screen)
+                const x = 10 + Math.random() * 80;
+                const y = 20 + Math.random() * 60;
+                el.style.left = `${x}%`;
+                el.style.top = `${y}%`;
+                
+                if (typeof itemData === 'string') {
+                    el.innerHTML = itemData; // direct emoji
+                    el.dataset.correct = (itemData === '⚠️').toString();
+                } else {
+                    el.innerHTML = itemData.icon;
+                    el.dataset.correct = itemData.correct.toString();
+                    el.classList.remove('anim-pulse-red');
+                    el.classList.add('bg-white/80', 'border-water-500'); // different style for items
+                }
+
+                // Interaction
+                el.addEventListener('touchstart', (e) => this.handleTap(e, el, onClickCallback), {passive: false});
+                el.addEventListener('mousedown', (e) => this.handleTap(e, el, onClickCallback));
+
+                this.container.appendChild(el);
+                this.activeObjects.push(el);
+                AudioSys.pop();
+            },
+
+            handleTap(e, el, callback) {
+                e.preventDefault(); // prevent double fire
+                if(el.dataset.tapped) return;
+                el.dataset.tapped = "true";
+                
+                const isCorrect = el.dataset.correct === "true";
+                
+                // Visual feedback
+                el.classList.remove('anim-pulse-red');
+                el.style.animation = 'none'; // stop floating temporarily
+                el.style.transform = 'translate(-50%, -50%) scale(1.2)';
+                
+                if(isCorrect) {
+                    el.style.background = 'rgba(34, 197, 94, 0.8)'; // Green
+                    el.innerHTML = '<i class="fas fa-check text-white"></i>';
+                } else {
+                    el.style.background = 'rgba(239, 68, 68, 0.8)'; // Red
+                    el.innerHTML = '<i class="fas fa-times text-white"></i>';
+                }
+
+                // Get click coords for floating score
+                const rect = el.getBoundingClientRect();
+                const clickX = rect.left + rect.width/2;
+                const clickY = rect.top;
+
+                setTimeout(() => {
+                    el.style.transform = 'translate(-50%, -50%) scale(0)';
+                    setTimeout(() => el.remove(), 300);
+                }, 500);
+
+                callback(isCorrect, clickX, clickY);
+            }
+        };
+
+        // --- STREAMING_CHUNK:Game Logic & Level Management ---
+        const GameEngine = {
+            timerInterval: null,
+            timeLeft: 0,
+            targetsFound: 0,
+            currentLevelData: null,
+
+            start() {
+                AppState.isGameRunning = true;
+                this.loadLevel(AppState.currentLevel);
+            },
+
+            loadLevel(levelNum) {
+                if (levelNum > Levels.length) {
+                    this.gameComplete();
+                    return;
+                }
+
+                this.currentLevelData = Levels[levelNum - 1];
+                this.targetsFound = 0;
+                AREngine.clear();
+                UI.updateHUD();
+                
+                // Reset Combo per level start
+                AppState.combo = 0; 
+                this.updateComboUI();
+
+                const type = this.currentLevelData.type;
+                logDebug(`Loading Level ${levelNum}: ${type}`);
+
+                if (type === 'ar_find' || type === 'ar_catch') {
+                    this.startARMode();
+                } else if (type === 'quiz') {
+                    this.startQuizMode();
+                }
+            },
+
+            startARMode() {
+                document.getElementById('hud-progress').style.width = '0%';
+                
+                // Spawn objects over time to feel dynamic
+                const items = [...this.currentLevelData.spawnItems];
+                // Shuffle items
+                items.sort(() => Math.random() - 0.5);
+                
+                let spawnDelay = 0;
+                items.forEach(item => {
+                    setTimeout(() => {
+                        if(AppState.isGameRunning) {
+                            AREngine.spawn(this.currentLevelData.type, item, (isCorrect, x, y) => this.onARItemTap(isCorrect, x, y));
+                        }
+                    }, spawnDelay);
+                    spawnDelay += 600; // spawn every 600ms
+                });
+
+                if (this.currentLevelData.time > 0) {
+                    this.startTimer(this.currentLevelData.time);
+                } else {
+                    document.getElementById('hud-timer').innerText = "∞";
+                }
+            },
+
+            onARItemTap(isCorrect, x, y) {
+                if (!AppState.isGameRunning) return;
+
+                if (isCorrect) {
+                    AudioSys.correct();
+                    AppState.combo++;
+                    this.targetsFound++;
+                    
+                    // Calc score with combo multiplier
+                    let basePts = 10;
+                    let mult = 1;
+                    if(AppState.combo >= 10) mult = 2.0;
+                    else if(AppState.combo >= 5) mult = 1.5;
+                    else if(AppState.combo >= 3) mult = 1.2;
+                    
+                    let earned = Math.floor(basePts * mult);
+                    this.addScore(earned);
+                    UI.spawnFloatingScore(x, y, earned);
+                    UI.showMessage("เยี่ยมมาก!", "text-safe-400");
+                    this.updateComboUI();
+
+                    // Update Progress Bar
+                    const pct = (this.targetsFound / this.currentLevelData.targetCount) * 100;
+                    document.getElementById('hud-progress').style.width = `${pct}%`;
+
+                    if (this.targetsFound >= this.currentLevelData.targetCount) {
+                        this.levelComplete();
+                    }
+                } else {
+                    AudioSys.wrong();
+                    AppState.combo = 0;
+                    this.updateComboUI();
+                    this.addScore(-5);
+                    UI.spawnFloatingScore(x, y, -5);
+                    UI.showMessage("ยังไม่ใช่!", "text-danger-500");
+                }
+            },
+
+            startQuizMode() {
+                document.getElementById('hud-timer').innerText = "--:--";
+                document.getElementById('hud-progress').style.width = '50%';
+                
+                const qBox = document.getElementById('modal-quiz');
+                const optionsContainer = document.getElementById('quiz-options');
+                
+                document.getElementById('quiz-question').innerText = this.currentLevelData.question;
+                optionsContainer.innerHTML = '';
+                
+                this.currentLevelData.options.forEach((opt, idx) => {
+                    const btn = document.createElement('button');
+                    btn.className = "w-full text-left p-4 bg-gray-50 border border-gray-200 rounded-xl hover:bg-water-50 font-medium active:scale-95 transition flex items-center";
+                    btn.innerHTML = `<span class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center mr-3 font-bold text-gray-600">${String.fromCharCode(65+idx)}</span> ${opt.text}`;
+                    
+                    btn.onclick = () => {
+                        // Disable buttons
+                        Array.from(optionsContainer.children).forEach(b => b.disabled = true);
+                        
+                        if (opt.correct) {
+                            btn.classList.replace('bg-gray-50', 'bg-safe-100');
+                            btn.classList.replace('border-gray-200', 'border-safe-500');
+                            AudioSys.correct();
+                            this.addScore(20);
+                            setTimeout(() => {
+                                alert(`✅ ถูกต้อง!\n${opt.reason}`); // Simple fallback alert for explanation in 1 file
+                                qBox.classList.add('opacity-0', 'pointer-events-none');
+                                setTimeout(() => { qBox.classList.add('hidden'); this.levelComplete(); }, 300);
+                            }, 500);
+                        } else {
+                            btn.classList.replace('bg-gray-50', 'bg-danger-100');
+                            btn.classList.replace('border-gray-200', 'border-danger-500');
+                            AudioSys.wrong();
+                            this.addScore(-10);
+                            setTimeout(() => {
+                                alert(`❌ ไม่ถูกต้อง\n${opt.reason}`);
+                                Array.from(optionsContainer.children).forEach(b => {
+                                    b.disabled = false;
+                                    b.className = "w-full text-left p-4 bg-gray-50 border border-gray-200 rounded-xl hover:bg-water-50 font-medium active:scale-95 transition flex items-center";
+                                });
+                            }, 1000);
+                        }
+                    };
+                    optionsContainer.appendChild(btn);
+                });
+
+                qBox.classList.remove('hidden');
+                // trigger reflow
+                void qBox.offsetWidth;
+                qBox.classList.remove('opacity-0');
+                qBox.classList.add('opacity-100');
+            },
+
+            startTimer(seconds) {
+                this.timeLeft = seconds;
+                clearInterval(this.timerInterval);
+                const timerEl = document.getElementById('hud-timer');
+                
+                const updateTimer = () => {
+                    if(!AppState.isGameRunning) { clearInterval(this.timerInterval); return; }
+                    
+                    timerEl.innerText = `00:${this.timeLeft < 10 ? '0'+this.timeLeft : this.timeLeft}`;
+                    if(this.timeLeft <= 5) timerEl.classList.add('text-danger-500', 'anim-pulse-red');
+                    else timerEl.classList.remove('text-danger-500', 'anim-pulse-red');
+
+                    if (this.timeLeft <= 0) {
+                        clearInterval(this.timerInterval);
+                        AudioSys.wrong();
+                        alert("หมดเวลา! ลองพยายามใหม่อีกครั้ง");
+                        this.loadLevel(AppState.currentLevel); // Restart level
+                    }
+                    this.timeLeft--;
                 };
                 
-                window.processVideoFrame();
-                
-            } catch (error) {
-                console.error("Camera Error:", error);
-                
-                let errorMsg = "ไม่สามารถเข้าถึงกล้องได้ (" + error.message + ")";
-                
-                // เปลี่ยนกลับมาแสดงหน้าแจ้งเตือน
-                loadingScreen.style.display = 'flex';
-                loadingScreen.innerHTML = `
-                    <div class="bg-red-900/90 p-8 rounded-2xl text-center max-w-lg border-2 border-red-500 shadow-2xl pointer-events-auto">
-                        <h2 class="text-3xl font-bold text-yellow-300 mb-4">⚠️ ไม่สามารถเปิดกล้องได้</h2>
-                        <p class="text-red-100 mb-6 text-lg">${errorMsg}</p>
-                        <p class="text-slate-300 text-sm mb-6 text-left p-4 bg-black/40 rounded-xl">
-                            <b>💡 วิธีแก้ไขเบื้องต้น:</b><br>
-                            1. มองหาไอคอนรูป 🔒 บนแถบ URL แล้วกดเปลี่ยนสิทธิ์กล้องเป็น "อนุญาต"<br>
-                            2. หากเล่นผ่านมือถือ iPhone (Safari) ให้ไปที่ Settings > Safari > Camera เปลี่ยนเป็น Allow<br>
-                        </p>
-                        <button onclick="location.reload()" class="bg-white text-red-600 px-8 py-3 rounded-full font-bold text-xl hover:bg-slate-200 transition">รีเฟรชหน้าเว็บใหม่</button>
-                    </div>
-                `;
-            }
-        }
+                updateTimer();
+                this.timerInterval = setInterval(updateTimer, 1000);
+            },
 
-        // Blank canvas init
-        canvasCtx.fillStyle = "#0f172a";
-        canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+            addScore(pts) {
+                AppState.score += pts;
+                if(AppState.score < 0) AppState.score = 0;
+                UI.updateHUD();
+                this.checkBadges();
+            },
+
+            updateComboUI() {
+                const el = document.getElementById('hud-combo');
+                if (AppState.combo >= 3) {
+                    el.innerText = `🔥 Combo x${AppState.combo}!`;
+                    el.classList.remove('hidden');
+                    el.classList.remove('scale-100');
+                    void el.offsetWidth;
+                    el.classList.add('scale-110');
+                    setTimeout(()=> el.classList.remove('scale-110'), 200);
+                } else {
+                    el.classList.add('hidden');
+                }
+            },
+
+            checkBadges() {
+                Badges.forEach(b => {
+                    if (!AppState.unlockedBadges.includes(b.id) && AppState.score >= b.reqScore) {
+                        AppState.unlockedBadges.push(b.id);
+                        this.showBadgeAlert(b);
+                        AudioSys.win();
+                    }
+                });
+                this.saveProgress();
+            },
+
+            showBadgeAlert(badge) {
+                const alertEl = document.getElementById('new-badge-alert');
+                document.getElementById('new-badge-icon').className = `fas ${badge.icon} text-4xl text-warning-400 mb-2`;
+                document.getElementById('new-badge-name').innerText = badge.name;
+                alertEl.classList.remove('hidden');
+            },
+
+            levelComplete() {
+                clearInterval(this.timerInterval);
+                AppState.isGameRunning = false;
+                AREngine.clear();
+                AudioSys.win();
+                
+                // Base level completion score + time bonus
+                let bonus = this.timeLeft > 0 ? this.timeLeft * 2 : 0;
+                let totalLevelScore = 50 + bonus;
+                this.addScore(totalLevelScore);
+
+                document.getElementById('complete-title').innerText = `ผ่านด่าน ${AppState.currentLevel}!`;
+                document.getElementById('complete-score').innerText = `+${totalLevelScore}`;
+                
+                const modal = document.getElementById('modal-level-complete');
+                modal.classList.remove('hidden');
+                void modal.offsetWidth;
+                modal.classList.remove('opacity-0');
+            },
+
+            nextLevel() {
+                const modal = document.getElementById('modal-level-complete');
+                modal.classList.add('opacity-0');
+                document.getElementById('new-badge-alert').classList.add('hidden'); // reset badge alert
+                
+                setTimeout(() => {
+                    modal.classList.add('hidden');
+                    AppState.currentLevel++;
+                    this.saveProgress();
+                    this.loadLevel(AppState.currentLevel);
+                }, 300);
+            },
+
+            gameComplete() {
+                alert(`🎉 ยินดีด้วย! คุณผ่านทุกภารกิจและเป็น WATER SAFETY HERO!\nคะแนนรวม: ${AppState.score}`);
+                this.quit();
+            },
+
+            quit() {
+                AppState.isGameRunning = false;
+                clearInterval(this.timerInterval);
+                CameraManager.stop();
+                AREngine.clear();
+                UI.refreshDashboard();
+                UI.showScreen('screen-dashboard');
+            },
+
+            saveProgress() {
+                localStorage.setItem('safeWaterArSave', JSON.stringify({
+                    score: AppState.score,
+                    level: AppState.currentLevel > 5 ? 5 : AppState.currentLevel,
+                    badges: AppState.unlockedBadges
+                }));
+            },
+
+            loadProgress() {
+                try {
+                    const save = JSON.parse(localStorage.getItem('safeWaterArSave'));
+                    if(save) {
+                        AppState.score = save.score || 0;
+                        AppState.currentLevel = save.level || 1;
+                        AppState.unlockedBadges = save.badges || [];
+                    }
+                } catch(e) { logDebug("No save data."); }
+            }
+        };
+
+        // --- STREAMING_CHUNK:App Initialization & Entry Points ---
+        const App = {
+            init() {
+                if (CONFIG.debugMode) document.getElementById('debug-panel').classList.remove('hidden');
+                logDebug("App Initialized.");
+                GameEngine.loadProgress();
+                UI.refreshDashboard();
+                UI.showScreen('screen-welcome');
+            },
+
+            startFlow() {
+                logDebug("Starting Flow...");
+                // Reset to level 1 if completed
+                if(AppState.currentLevel > 5) AppState.currentLevel = 1; 
+                
+                // Show safety warning first, which then triggers camera request
+                UI.showScreen('screen-warning');
+            }
+        };
+
+        // Run on load
+        window.onload = () => App.init();
 
     </script>
 </body>
