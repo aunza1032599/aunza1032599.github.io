@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Game: กลไกการป้องกันตัวในเด็ก (Google Apps Script)</title>
+    
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Libraries (Safe for GAS IFRAME) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Kanit', sans-serif;
+            background-color: #0f172a; /* Slate 900 fallback */
+            touch-action: none; /* Prevent scrolling on mobile */
+        }
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #output_canvas {
+            position: absolute;
+            z-index: 10;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror camera */
+        }
+        /* ลบ display: flex ซ้ำซ้อนออก ป้องกันปัญหาหน้าจอไม่ยอมซ่อน */
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 20;
+            pointer-events: none;
+        }
+        .interactive-btn {
+            pointer-events: auto;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            cursor: pointer;
+        }
+        .interactive-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(52, 211, 153, 0.8);
+        }
+        .loader {
+            border: 6px solid #f3f3f3;
+            border-top: 6px solid #3b82f6;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <!-- Hidden video element -->
+        <video id="input_video" style="display: none;" autoplay playsinline muted></video>
+        
+        <!-- Game Canvas -->
+        <canvas id="output_canvas"></canvas>
+
+        <!-- Start Screen -->
+        <div id="start-screen" class="ui-layer flex flex-col justify-center items-center bg-slate-900/90 backdrop-blur-md text-white">
+            <h1 class="text-4xl md:text-6xl font-bold mb-4 text-center text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.5)]">
+                🖐️ เกมจับคู่ AR
+            </h1>
+            <h2 class="text-xl md:text-3xl mb-8 text-center px-4">
+                เรียนรู้กลไกการป้องกันตัวในเด็ก <br><span class="text-lg md:text-xl text-slate-300">(Defense Mechanisms)</span>
+            </h2>
+            <div class="bg-white/10 p-6 rounded-2xl max-w-lg mb-8 text-left border border-white/20 shadow-xl">
+                <p class="text-xl mb-3 text-center text-blue-300 font-bold">วิธีการเล่น</p>
+                <ul class="text-base text-slate-200 space-y-2 list-disc list-inside">
+                    <li>อนุญาตให้เบราว์เซอร์เข้าถึง <strong>กล้อง (Camera)</strong></li>
+                    <li>อ่านสถานการณ์ที่ปรากฏบนหน้าจอ</li>
+                    <li><strong>ยกฝ่ามือขึ้นมา</strong> เล็งเป้าไปที่คำตอบที่ถูกต้อง</li>
+                    <li>วางมือค้างไว้ <strong>2 วินาที</strong> เพื่อยืนยันคำตอบ</li>
+                </ul>
+            </div>
+            <button id="start-btn" onclick="initGame()" class="interactive-btn bg-gradient-to-r from-emerald-400 to-teal-500 text-white font-bold py-4 px-12 rounded-full text-2xl border-2 border-white/50">
+                เริ่มเล่นเกมเลย!
+            </button>
+        </div>
+
+        <!-- Loading Screen -->
+        <div id="loading-screen" class="ui-layer hidden flex-col justify-center items-center bg-slate-900/95 text-white">
+            <div class="loader mb-6"></div>
+            <h2 class="text-2xl font-semibold text-blue-400">กำลังเชื่อมต่อกล้องและ AI...</h2>
+            <p class="text-slate-400 mt-2 text-sm text-center px-4">ระบบกำลังโหลดโมเดลตรวจจับฝ่ามือ<br>หากมี Popup ขึ้นมา กรุณากด "Allow" หรือ "อนุญาต"</p>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="game-over-screen" class="ui-layer hidden flex-col justify-center items-center bg-slate-900/95 text-white">
+            <h1 class="text-5xl font-bold mb-6 text-yellow-400 drop-shadow-lg">จบเกม! 🎉</h1>
+            <p class="text-3xl mb-10 bg-slate-800 px-8 py-4 rounded-2xl border border-slate-600">
+                คะแนนรวม: <span id="final-score" class="text-green-400 font-bold text-5xl ml-2">0</span> <span class="text-2xl">/ 5</span>
+            </p>
+            <button id="restart-btn" onclick="restartGame()" class="interactive-btn bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-10 rounded-full text-xl border-2 border-white/30">
+                เล่นอีกครั้ง
+            </button>
+        </div>
+        
+        <!-- Feedback Overlay -->
+        <div id="feedback-overlay" class="ui-layer hidden flex-col justify-center items-center transition-opacity duration-300 bg-black/40">
+            <div id="feedback-box" class="px-10 py-6 rounded-3xl font-bold text-5xl transform scale-0 transition-transform duration-300">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Game Questions Database
+        const quizData = [
+            {
+                scenario: "น้องบอยทำแก้วน้ำแตก แต่พอบอกแม่กลับพูดว่า 'แมวชนแตกต่างหาก หนูไม่ได้ทำ!'",
+                options: ["Projection (โยนความผิด)", "Denial (ปฏิเสธความจริง)", "Regression (ถดถอย)"],
+                correctIndex: 0
+            },
+            {
+                scenario: "น้องแอนอายุ 6 ขวบ เลิกดูดนิ้วไปนานแล้ว แต่พอแม่มีน้องทารกคนใหม่ น้องแอนก็กลับมาดูดนิ้วอีกครั้ง",
+                options: ["Rationalization (หาเหตุผล)", "Displacement (ย้ายที่อารมณ์)", "Regression (ถดถอย)"],
+                correctIndex: 2
+            },
+            {
+                scenario: "โดนคุณครูดุที่โรงเรียน พอกลับบ้านมาโกรธมาก เลยเตะตุ๊กตาตัวโปรดกระจุยกระจาย",
+                options: ["Displacement (ย้ายที่อารมณ์)", "Projection (โยนความผิด)", "Denial (ปฏิเสธความจริง)"],
+                correctIndex: 0
+            },
+            {
+                scenario: "สอบตกวิชาคณิตศาสตร์ แทนที่จะยอมรับว่าไม่ได้อ่านหนังสือ กลับบอกว่า 'ข้อสอบมันยากเกินไป ใครๆ ก็ทำไม่ได้หรอก'",
+                options: ["Denial (ปฏิเสธความจริง)", "Rationalization (หาเหตุผล)", "Regression (ถดถอย)"],
+                correctIndex: 1
+            },
+            {
+                scenario: "แอบกินขนมเค้กของพี่สาวจนหมด แต่พอบอกว่าใครกิน ก็ตอบหน้าตาเฉยว่า 'เปล่านะ ไม่รู้เรื่อง ไม่ได้กิน'",
+                options: ["Denial (ปฏิเสธความจริง)", "Displacement (ย้ายที่อารมณ์)", "Rationalization (หาเหตุผล)"],
+                correctIndex: 0
+            }
+        ];
+
+        // Core Elements
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        
+        // UI Elements
+        const startScreen = document.getElementById('start-screen');
+        const loadingScreen = document.getElementById('loading-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const feedbackOverlay = document.getElementById('feedback-overlay');
+        const feedbackBox = document.getElementById('feedback-box');
+        
+        // State Variables
+        let camera = null;
+        let hands = null;
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let isPlaying = false;
+        let isTransitioning = false; 
+        
+        // Selection Variables
+        let hoveredOptionIndex = -1;
+        let hoverStartTime = 0;
+        const HOVER_THRESHOLD_MS = 2000; // Increased to 2 seconds for better deliberate selection
+        let optionBoxes = [];
+
+        function resizeCanvas() {
+            // Slight delay ensures Google Apps Script iframe has updated its dimensions
+            setTimeout(() => {
+                canvasElement.width = window.innerWidth;
+                canvasElement.height = window.innerHeight;
+            }, 100);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function drawRoundedRect(ctx, x, y, width, height, radius) {
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+        }
+
+        function wrapText(context, text, x, y, maxWidth, lineHeight) {
+            const words = text.split(' ');
+            let line = '';
+            let lines = [];
+
+            for(let n = 0; n < words.length; n++) {
+                let testLine = line + words[n] + ' ';
+                let metrics = context.measureText(testLine);
+                let testWidth = metrics.width;
+                if (testWidth > maxWidth && n > 0) {
+                    lines.push(line);
+                    line = words[n] + ' ';
+                } else {
+                    line = testLine;
+                }
+            }
+            lines.push(line);
+            
+            let startY = y - ((lines.length - 1) * lineHeight) / 2;
+            for(let k = 0; k < lines.length; k++) {
+                context.fillText(lines[k], x, startY + (k * lineHeight));
+            }
+        }
+
+        function drawGameUI() {
+            if (!isPlaying || isTransitioning) return;
+            
+            const questionData = quizData[currentQuestionIndex];
+            const cw = canvasElement.width;
+            const ch = canvasElement.height;
+            
+            // Un-flip context for drawing text properly over mirrored camera
+            canvasCtx.save();
+            canvasCtx.translate(cw, 0);
+            canvasCtx.scale(-1, 1);
+            
+            // 1. Top Bar (Score & Progress)
+            canvasCtx.fillStyle = "rgba(15, 23, 42, 0.7)"; // slate-900
+            drawRoundedRect(canvasCtx, 20, 20, 220, 50, 15);
+            canvasCtx.fill();
+            canvasCtx.fillStyle = "white";
+            canvasCtx.font = "22px Kanit";
+            canvasCtx.textAlign = "left";
+            canvasCtx.fillText(`ข้อที่: ${currentQuestionIndex + 1} / ${quizData.length}`, 40, 53);
+            
+            canvasCtx.fillStyle = "rgba(15, 23, 42, 0.7)";
+            drawRoundedRect(canvasCtx, cw - 180, 20, 160, 50, 15);
+            canvasCtx.fill();
+            canvasCtx.fillStyle = "#4ade80"; // green-400
+            canvasCtx.fillText(`คะแนน: ${score}`, cw - 160, 53);
+
+            // 2. Question Box
+            const qBoxWidth = Math.min(cw * 0.85, 800);
+            const qBoxHeight = 160;
+            const qBoxX = (cw - qBoxWidth) / 2;
+            const qBoxY = 90;
+            
+            canvasCtx.shadowColor = "rgba(0, 0, 0, 0.5)";
+            canvasCtx.shadowBlur = 15;
+            canvasCtx.shadowOffsetY = 5;
+            canvasCtx.fillStyle = "rgba(255, 255, 255, 0.95)";
+            drawRoundedRect(canvasCtx, qBoxX, qBoxY, qBoxWidth, qBoxHeight, 20);
+            canvasCtx.fill();
+            canvasCtx.shadowBlur = 0;
+            canvasCtx.shadowOffsetY = 0;
+            
+            canvasCtx.fillStyle = "#0f172a";
+            canvasCtx.font = "bold 26px Kanit";
+            canvasCtx.textAlign = "center";
+            canvasCtx.textBaseline = "middle";
+            wrapText(canvasCtx, "สถานการณ์: " + questionData.scenario, qBoxX + qBoxWidth/2, qBoxY + qBoxHeight/2, qBoxWidth - 40, 38);
+
+            // 3. Option Boxes
+            optionBoxes = [];
+            const optCount = questionData.options.length;
+            const gap = 20;
+            const isMobile = cw < 768;
+            
+            // Adjust layout for mobile (stack vertically if too narrow, or use smaller boxes)
+            const optBoxWidth = isMobile ? Math.min(cw - 40, 400) : Math.min(320, (cw - (gap * (optCount+1))) / optCount);
+            const optBoxHeight = isMobile ? 90 : 120;
+            
+            // If mobile, stack them vertically. If desktop, horizontal row.
+            const startX = isMobile ? (cw - optBoxWidth) / 2 : (cw - ((optBoxWidth * optCount) + (gap * (optCount - 1)))) / 2;
+            let startY = isMobile ? ch - (optBoxHeight * optCount) - (gap * optCount) - 20 : ch - optBoxHeight - 60;
+
+            for (let i = 0; i < optCount; i++) {
+                const ox = isMobile ? startX : startX + (i * (optBoxWidth + gap));
+                const oy = isMobile ? startY + (i * (optBoxHeight + gap)) : startY;
+                
+                optionBoxes.push({ x: ox, y: oy, width: optBoxWidth, height: optBoxHeight, index: i });
+
+                const isHovered = (hoveredOptionIndex === i);
+                
+                // Box Styling
+                if (isHovered) {
+                    canvasCtx.fillStyle = "#3b82f6"; // blue-500
+                    canvasCtx.shadowColor = "rgba(59, 130, 246, 0.8)";
+                    canvasCtx.shadowBlur = 20;
+                    drawRoundedRect(canvasCtx, ox - 4, oy - 4, optBoxWidth + 8, optBoxHeight + 8, 20);
+                } else {
+                    canvasCtx.fillStyle = "rgba(255, 255, 255, 0.9)";
+                    canvasCtx.shadowColor = "rgba(0,0,0,0.2)";
+                    canvasCtx.shadowBlur = 10;
+                    drawRoundedRect(canvasCtx, ox, oy, optBoxWidth, optBoxHeight, 20);
+                }
+                canvasCtx.fill();
+                canvasCtx.shadowBlur = 0; // reset
+                
+                // Text inside box
+                canvasCtx.fillStyle = isHovered ? "white" : "#1e293b";
+                canvasCtx.font = isMobile ? "bold 20px Kanit" : "bold 22px Kanit";
+                wrapText(canvasCtx, questionData.options[i], ox + optBoxWidth/2, oy + optBoxHeight/2, optBoxWidth - 20, 28);
+                
+                // Loading Progress Bar Overlay
+                if (isHovered && hoverStartTime > 0) {
+                    const elapsed = performance.now() - hoverStartTime;
+                    const progress = Math.min(elapsed / HOVER_THRESHOLD_MS, 1);
+                    
+                    canvasCtx.fillStyle = "rgba(16, 185, 129, 0.5)"; // emerald-500
+                    const fillWidth = optBoxWidth * progress;
+                    
+                    // Fill from left to right
+                    canvasCtx.beginPath();
+                    // Clip to rounded rect to keep it neat
+                    drawRoundedRect(canvasCtx, ox, oy, optBoxWidth, optBoxHeight, 20);
+                    canvasCtx.clip();
+                    canvasCtx.fillRect(ox, oy, fillWidth, optBoxHeight);
+                    
+                    // Reset clip
+                    canvasCtx.beginPath();
+                    canvasCtx.rect(0,0,cw,ch);
+                    canvasCtx.clip();
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        function onResults(results) {
+            const cw = canvasElement.width;
+            const ch = canvasElement.height;
+            
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, cw, ch);
+            
+            // Draw raw camera feed
+            canvasCtx.drawImage(results.image, 0, 0, cw, ch);
+            
+            // Draw UI Layers
+            drawGameUI();
+
+            if (isPlaying && !isTransitioning && results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                const pointer = landmarks[9]; // Base of middle finger
+                
+                // Mapping coordinate for CSS-mirrored canvas
+                const handX = (1 - pointer.x) * cw;
+                const handY = pointer.y * ch;
+
+                // Draw Virtual Cursor
+                canvasCtx.beginPath();
+                canvasCtx.arc(pointer.x * cw, pointer.y * ch, 25, 0, 2 * Math.PI);
+                canvasCtx.fillStyle = "rgba(16, 185, 129, 0.6)"; // emerald-500
+                canvasCtx.fill();
+                canvasCtx.lineWidth = 4;
+                canvasCtx.strokeStyle = "white";
+                canvasCtx.stroke();
+                
+                canvasCtx.beginPath();
+                canvasCtx.arc(pointer.x * cw, pointer.y * ch, 6, 0, 2 * Math.PI);
+                canvasCtx.fillStyle = "white";
+                canvasCtx.fill();
+
+                // Collision Detection with UI boxes
+                let currentHover = -1;
+                for (const box of optionBoxes) {
+                    if (handX >= box.x && handX <= box.x + box.width &&
+                        handY >= box.y && handY <= box.y + box.height) {
+                        currentHover = box.index;
+                        break;
+                    }
+                }
+
+                // Handle Selection Timer
+                if (currentHover !== -1) {
+                    if (hoveredOptionIndex !== currentHover) {
+                        hoveredOptionIndex = currentHover;
+                        hoverStartTime = performance.now();
+                    } else {
+                        const elapsed = performance.now() - hoverStartTime;
+                        if (elapsed >= HOVER_THRESHOLD_MS) {
+                            handleAnswerSelection(currentHover);
+                        }
+                    }
+                } else {
+                    hoveredOptionIndex = -1;
+                    hoverStartTime = 0;
+                }
+            } else {
+                 hoveredOptionIndex = -1;
+                 hoverStartTime = 0;
+            }
+            canvasCtx.restore();
+        }
+
+        function handleAnswerSelection(selectedIndex) {
+            if (isTransitioning) return;
+            isTransitioning = true;
+            
+            const questionData = quizData[currentQuestionIndex];
+            const isCorrect = selectedIndex === questionData.correctIndex;
+            
+            if (isCorrect) {
+                score++;
+                showFeedback(true, "ถูกต้อง! 🎉");
+            } else {
+                showFeedback(false, "ผิดจ้า! ❌<br><span class='text-2xl mt-4 block text-red-100 bg-red-900/50 px-4 py-2 rounded-xl'>คำตอบที่ถูกคือ: " + questionData.options[questionData.correctIndex] + "</span>");
+            }
+            
+            setTimeout(() => {
+                currentQuestionIndex++;
+                if (currentQuestionIndex < quizData.length) {
+                    isTransitioning = false;
+                    hoveredOptionIndex = -1;
+                    hideFeedback();
+                } else {
+                    endGame();
+                }
+            }, 3000); // Show feedback for 3 seconds
+        }
+
+        function showFeedback(isCorrect, htmlText) {
+            feedbackOverlay.classList.remove('hidden');
+            feedbackOverlay.classList.add('flex');
+            
+            feedbackBox.innerHTML = htmlText;
+            
+            if (isCorrect) {
+                feedbackBox.className = "px-12 py-10 rounded-3xl font-bold text-5xl md:text-6xl text-center shadow-[0_0_50px_rgba(74,222,128,0.8)] transform scale-0 transition-transform duration-300 bg-green-500 text-white border-4 border-white";
+            } else {
+                feedbackBox.className = "px-12 py-10 rounded-3xl font-bold text-4xl md:text-5xl text-center shadow-[0_0_50px_rgba(248,113,113,0.8)] transform scale-0 transition-transform duration-300 bg-red-500 text-white border-4 border-white";
+            }
+            
+            // Pop animation
+            setTimeout(() => {
+                feedbackBox.classList.remove('scale-0');
+                feedbackBox.classList.add('scale-100');
+            }, 50);
+        }
+
+        function hideFeedback() {
+            feedbackBox.classList.remove('scale-100');
+            feedbackBox.classList.add('scale-0');
+            setTimeout(() => {
+                feedbackOverlay.style.display = 'none';
+                feedbackOverlay.classList.add('hidden');
+                feedbackOverlay.classList.remove('flex');
+            }, 300);
+        }
+
+        function endGame() {
+            isPlaying = false;
+            hideFeedback();
+            document.getElementById('final-score').innerText = score;
+            
+            // ใช้ style.display เพื่อบังคับแสดงผล 100%
+            gameOverScreen.style.display = 'flex';
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        function restartGame() {
+            score = 0;
+            currentQuestionIndex = 0;
+            isTransitioning = false;
+            hoveredOptionIndex = -1;
+            
+            gameOverScreen.style.display = 'none';
+            gameOverScreen.classList.add('hidden');
+            
+            isPlaying = true;
+            window.processVideoFrame(); // Resume frame processing if needed
+        }
+
+        async function initGame() {
+            // 1. บังคับซ่อนหน้าจอ Start Screen ทันทีที่กด
+            startScreen.style.display = 'none';
+            startScreen.classList.add('hidden');
+            
+            loadingScreen.style.display = 'flex';
+            loadingScreen.classList.remove('hidden');
+
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error("เบราว์เซอร์ไม่รองรับ API กล้อง (ต้องการ HTTPS)");
+                }
+
+                // 2. ปลดล็อคการจำกัดความละเอียดวิดีโอ (บางกล้อง Error ทันทีถ้ากำหนดตายตัว)
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "user" } 
+                });
+                
+                videoElement.srcObject = stream;
+                videoElement.muted = true;
+                videoElement.setAttribute('playsinline', ''); // สำคัญมากสำหรับ iPhone/iPad ไม่งั้นจอดำ
+                await videoElement.play();
+
+                // Config MediaPipe
+                hands = new Hands({locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }});
+                
+                hands.setOptions({
+                    maxNumHands: 1, 
+                    modelComplexity: 1, 
+                    minDetectionConfidence: 0.7,
+                    minTrackingConfidence: 0.7
+                });
+                
+                hands.onResults(onResults);
+                
+                // 3. เริ่มส่งภาพ
+                isPlaying = true;
+                loadingScreen.style.display = 'none';
+                loadingScreen.classList.add('hidden');
+
+                window.processVideoFrame = async function() {
+                    if (isPlaying && !videoElement.paused && !videoElement.ended) {
+                        await hands.send({image: videoElement});
+                        requestAnimationFrame(window.processVideoFrame);
+                    }
+                };
+                
+                window.processVideoFrame();
+                
+            } catch (error) {
+                console.error("Camera Error:", error);
+                
+                let errorMsg = "ไม่สามารถเข้าถึงกล้องได้ (" + error.message + ")";
+                
+                // เปลี่ยนกลับมาแสดงหน้าแจ้งเตือน
+                loadingScreen.style.display = 'flex';
+                loadingScreen.innerHTML = `
+                    <div class="bg-red-900/90 p-8 rounded-2xl text-center max-w-lg border-2 border-red-500 shadow-2xl pointer-events-auto">
+                        <h2 class="text-3xl font-bold text-yellow-300 mb-4">⚠️ ไม่สามารถเปิดกล้องได้</h2>
+                        <p class="text-red-100 mb-6 text-lg">${errorMsg}</p>
+                        <p class="text-slate-300 text-sm mb-6 text-left p-4 bg-black/40 rounded-xl">
+                            <b>💡 วิธีแก้ไขเบื้องต้น:</b><br>
+                            1. มองหาไอคอนรูป 🔒 บนแถบ URL แล้วกดเปลี่ยนสิทธิ์กล้องเป็น "อนุญาต"<br>
+                            2. หากเล่นผ่านมือถือ iPhone (Safari) ให้ไปที่ Settings > Safari > Camera เปลี่ยนเป็น Allow<br>
+                        </p>
+                        <button onclick="location.reload()" class="bg-white text-red-600 px-8 py-3 rounded-full font-bold text-xl hover:bg-slate-200 transition">รีเฟรชหน้าเว็บใหม่</button>
+                    </div>
+                `;
+            }
+        }
+
+        // Blank canvas init
+        canvasCtx.fillStyle = "#0f172a";
+        canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+
+    </script>
+</body>
+</html>
